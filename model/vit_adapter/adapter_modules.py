@@ -6,7 +6,7 @@ import torch.utils.checkpoint as cp
 from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
 from timm.models.layers import DropPath
 
-from ..tranformer_decoder import *
+from model.tranformer_decoder import *
 
 
 def get_reference_points(spatial_shapes, device):

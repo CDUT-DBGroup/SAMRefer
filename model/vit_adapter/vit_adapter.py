@@ -8,12 +8,12 @@ from functools import partial
 from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
 from mmdet.models.layers import SinePositionalEncoding
 
-from .adapter_modules import *
+from model.vit_adapter.adapter_modules import *
 
 
 class ViTAdapter(nn.Module):
-    def __init__(self, vis_model, vis_dim, lang_dim, vl_dim, num_prompts=[10, 8], conv_inplane=64, n_points=4, deform_ratio=1.0, 
-                 deform_num_heads=6, interaction_indexes=None, with_cffn=True, init_values=0.,
+    def __init__(self, vis_model, vis_dim, lang_dim, vl_dim = 768, num_prompts=[10, 8], conv_inplane=64, n_points=4, deform_ratio=1.0, 
+                 deform_num_heads=6, interaction_indexes=[[0, 1, 2, 3, 4, 5], [6, 7, 8, 9, 10, 11]], with_cffn=True, init_values=0.,
                  cffn_ratio=0.25, add_vit_feature=False, drop_path_rate=0., dropout=0.,
                  with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=2, using_clip=True):
         

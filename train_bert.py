@@ -12,13 +12,34 @@ from dataset.ReferDataset import ReferDataset
 from model.models.refersam import ReferSAM
 from model.segment_anything.build_sam import sam_model_registry
 from model.criterion import SegMaskLoss
-import deepspeed
-from deepspeed.ops.adam import DeepSpeedCPUAdam
+
+def count_parameters(model):
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    return total_params, trainable_params
+
+class ImageMaskTransform:
+    def __init__(self, size):
+        self.size = size
+        self.image_transform = transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        self.mask_transform = transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor()
+        ])
+
+    def __call__(self, img, mask):
+        img = self.image_transform(img)
+        mask = self.mask_transform(mask)
+        return img, mask
 
 def main():
     # Fixed arguments for BERT configuration
     args = argparse.Namespace(
-        batch_size=32,
+        batch_size=8,  # 减小 batch_size
         epochs=40,
         lr=2e-5,
         weight_decay=0.01,
@@ -26,20 +47,18 @@ def main():
         output_dir='output/refersam_bert',
         model_type='vit_b',
         checkpoint='/root/autodl-tmp/paper_data/weight/sam/sam_vit_b_01ec64.pth',  # 请根据实际SAM模型路径修改
-        local_rank=-1,
-        deepspeed_config='ds_config.json',
         tokenizer_type='bert',
         precision='fp32',
         clip_path=None,
         ck_bert='bert-base-uncased'
     )
 
-    # Initialize deepspeed
-    deepspeed.init_distributed()
-
     # Create output directory
-    if args.local_rank in [-1, 0]:
-        os.makedirs(args.output_dir, exist_ok=True)
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
 
     # Initialize SAM model
     print("Initializing SAM model...")
@@ -62,13 +81,18 @@ def main():
         num_classes=1,
         criterion=criterion
     )
+    
+    # Print model parameters
+    total_params, trainable_params = count_parameters(model)
+    print(f"\nModel Parameters:")
+    print(f"Total parameters: {total_params:,}")
+    print(f"Trainable parameters: {trainable_params:,}")
+    print(f"Non-trainable parameters: {total_params - trainable_params:,}")
+    
+    model = model.to(device)
 
     # Define image transforms
-    image_transforms = transforms.Compose([
-        transforms.Resize((480, 480)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
+    image_transforms = ImageMaskTransform(size=480)
 
     # Create datasets
     print("Creating dataset...")
@@ -91,47 +115,40 @@ def main():
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=4,
+        num_workers=0,  # 减少 worker 数量
         pin_memory=True
     )
 
     # Initialize optimizer
     print("Initializing optimizer...")
-    optimizer = DeepSpeedCPUAdam(
+    optimizer = optim.Adam(
         model.parameters(),
         lr=args.lr,
         weight_decay=args.weight_decay
     )
 
-    # Initialize deepspeed
-    print("Initializing DeepSpeed...")
-    model_engine, optimizer, _, _ = deepspeed.initialize(
-        model=model,
-        optimizer=optimizer,
-        config=args.deepspeed_config
-    )
-
     # Training loop
     print("Starting training...")
     for epoch in range(args.epochs):
-        model_engine.train()
+        model.train()
         total_loss = 0
         
         with tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.epochs}') as pbar:
             for samples, targets in pbar:
                 # Move data to device
-                img = samples['img'].to(model_engine.device)
-                word_ids = samples['word_ids'].to(model_engine.device)
-                word_masks = samples['word_masks'].to(model_engine.device)
-                target = targets['mask'].to(model_engine.device)
+                img = samples['img'].to(device, non_blocking=True)
+                word_ids = samples['word_ids'].to(device, non_blocking=True)
+                word_masks = samples['word_masks'].to(device, non_blocking=True)
+                target = targets['mask'].to(device, non_blocking=True)
 
                 # Forward pass
-                loss_dict = model_engine(img, word_ids, word_masks, target)
+                loss_dict = model(img, word_ids, word_masks, target)
                 loss = loss_dict['total_loss']
 
                 # Backward pass
-                model_engine.backward(loss)
-                model_engine.step()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
                 # Update progress bar
                 total_loss += loss.item()
@@ -141,11 +158,19 @@ def main():
                     'dice_loss': loss_dict['loss_dice'].item()
                 })
 
+                # Clear memory
+                del img, word_ids, word_masks, target, loss_dict, loss
+                torch.cuda.empty_cache()
+
         # Save checkpoint
-        if args.local_rank in [-1, 0]:
-            print(f"Saving checkpoint for epoch {epoch+1}...")
-            checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
-            model_engine.save_checkpoint(args.output_dir, tag=f'epoch_{epoch+1}')
+        print(f"Saving checkpoint for epoch {epoch+1}...")
+        checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
+        torch.save({
+            'epoch': epoch + 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'loss': total_loss / len(train_loader),
+        }, checkpoint_path)
 
 if __name__ == '__main__':
     main() 
