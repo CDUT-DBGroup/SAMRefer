@@ -134,14 +134,14 @@ def main():
         lr=2e-5,
         weight_decay=0.01,
         batch_size=8,
-        data_root='/root/autodl-tmp/paper_data/coco_data',
+        data_root='/public/home/2023020919/vision_paper/paper_data/coco_data',
         output_dir='output/refersam_bert',
         model_type='vit_b',
-        checkpoint='/root/autodl-tmp/paper_data/weight/sam/sam_vit_b_01ec64.pth',
+        checkpoint='/public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth',
         tokenizer_type='bert',
         precision='fp32',
         clip_path=None,
-        ck_bert='bert-base-uncased',
+        ck_bert='/public/home/2023020919/vision_paper/samrefer/bert-base-uncased',
         model_path='output/refersam_bert/checkpoint_epoch_1.pt'  # Path to the trained model
     )
 
@@ -170,8 +170,8 @@ def main():
     
     # Load trained model weights
     print(f"Loading model weights from {args.model_path}")
-    checkpoint = torch.load(args.model_path, map_location=device)
-    model.load_state_dict(checkpoint['model_state_dict'])
+    # checkpoint = torch.load(args.model_path, map_location=device)
+    # model.load_state_dict(checkpoint['model_state_dict'])
     model = model.to(device)
     model.eval()  # Set model to evaluation mode
 
@@ -222,19 +222,19 @@ def main():
     print(f"best_cIoU: {metrics['best_cIoU']:.4f}")
     print(f"best_gIoU: {metrics['best_gIoU']:.4f}")
     # 可视化前两张预测结果
-    print("\nGenerating visualization for first 2 samples...")
-    model.eval()
-    with torch.no_grad():
-        vis_count = 0
-        for batch_idx, batch in enumerate(val_loader):
-            images = batch[batch_idx]['img'].to(device)
-            word_ids = batch[batch_idx]['word_ids'].to(device, non_blocking=True)
-            word_masks = batch[batch_idx]['word_masks'].to(device)
-            texts = batch[batch_idx]['text']
+    # print("\nGenerating visualization for first 2 samples...")
+    # model.eval()
+    # with torch.no_grad():
+    #     vis_count = 0
+    #     for batch_idx, batch in enumerate(val_loader):
+    #         images = batch[batch_idx]['img'].to(device)
+    #         word_ids = batch[batch_idx]['word_ids'].to(device, non_blocking=True)
+    #         word_masks = batch[batch_idx]['word_masks'].to(device)
+    #         texts = batch[batch_idx]['text']
 
-            preds = model(images, word_ids, word_masks)
-            pred_masks = (preds > 0.5).float()
-            visualize_prediction_batch(images, pred_masks)
+    #         preds = model(images, word_ids, word_masks)
+    #         pred_masks = (preds > 0.5).float()
+    #         visualize_prediction_batch(images, pred_masks)
 
 if __name__ == '__main__':
     main() 

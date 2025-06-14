@@ -90,7 +90,7 @@ class ReferDataset(data.Dataset):
         if self.clip:
             self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
         else:
-            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+            self.tokenizer = BertTokenizer.from_pretrained('/public/home/2023020919/vision_paper/samrefer/bert-base-uncased')
 
         ref_ids = self.refer.getRefIds(split=self.split)
         img_ids = self.refer.getImgIds(ref_ids)

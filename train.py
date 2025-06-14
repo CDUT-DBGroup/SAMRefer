@@ -13,8 +13,8 @@ from dataset.ReferDataset import ReferDataset
 from model.models.refersam import ReferSAM
 from model.segment_anything.build_sam import sam_model_registry
 from model.criterion import SegMaskLoss
-import deepspeed
-from deepspeed.ops.adam import DeepSpeedCPUAdam
+# import deepspeed
+# from deepspeed.ops.adam import DeepSpeedCPUAdam
 
 def get_args_parser():
     parser = argparse.ArgumentParser('ReferSAM training script', add_help=False)
