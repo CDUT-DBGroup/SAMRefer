@@ -62,7 +62,7 @@ class SegMaskLoss(nn.Module):
             targets['mask']: [BxHxW]
         '''
         loss_dict = dict()
-        target = targets['mask'].to(pred.dtype)
+        target = targets.to(pred.dtype)
         main_losses = self.loss_masks(pred, target)
         loss_dict.update(main_losses)
 

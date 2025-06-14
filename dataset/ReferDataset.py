@@ -208,6 +208,7 @@ class ReferDataset(data.Dataset):
 
         samples = {
             "img": img,
+            "text": sentences,
             "word_ids": word_ids,
             "word_masks": word_masks,
         }

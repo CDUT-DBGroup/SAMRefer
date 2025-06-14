@@ -118,7 +118,7 @@ def main(args):
                 img = samples['img'].to(model_engine.device)
                 word_ids = samples['word_ids'].to(model_engine.device)
                 word_masks = samples['word_masks'].to(model_engine.device)
-                target = targets['mask'].to(model_engine.device)
+                target = targets['mask'].to(model_engine.device).squeeze(1)
 
                 # Forward pass
                 loss_dict = model_engine(img, word_ids, word_masks, target)

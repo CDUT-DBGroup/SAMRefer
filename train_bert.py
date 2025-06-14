@@ -12,6 +12,7 @@ from dataset.ReferDataset import ReferDataset
 from model.models.refersam import ReferSAM
 from model.segment_anything.build_sam import sam_model_registry
 from model.criterion import SegMaskLoss
+from evaluation import validate
 
 def count_parameters(model):
     total_params = sum(p.numel() for p in model.parameters())
@@ -39,14 +40,14 @@ class ImageMaskTransform:
 def main():
     # Fixed arguments for BERT configuration
     args = argparse.Namespace(
-        batch_size=8,  # 减小 batch_size
+        batch_size=8,
         epochs=40,
         lr=2e-5,
         weight_decay=0.01,
-        data_root='/root/autodl-tmp/paper_data/coco_data',  # 请根据实际数据路径修改
+        data_root='/root/autodl-tmp/paper_data/coco_data',
         output_dir='output/refersam_bert',
         model_type='vit_b',
-        checkpoint='/root/autodl-tmp/paper_data/weight/sam/sam_vit_b_01ec64.pth',  # 请根据实际SAM模型路径修改
+        checkpoint='/root/autodl-tmp/paper_data/weight/sam/sam_vit_b_01ec64.pth',
         tokenizer_type='bert',
         precision='fp32',
         clip_path=None,
@@ -60,16 +61,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
-    # Initialize SAM model
-    print("Initializing SAM model...")
+    # Initialize models and criterion
+    print("Initializing models...")
     sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
-    
-    # Initialize BERT model
-    print("Initializing BERT model...")
     text_model = BertModel.from_pretrained(args.ck_bert)
-    
-    # Initialize criterion
-    print("Initializing loss function...")
     criterion = SegMaskLoss(num_points=112*112, oversample_ratio=3.0, importance_sample_ratio=0.75)
 
     # Create model
@@ -95,7 +90,7 @@ def main():
     image_transforms = ImageMaskTransform(size=480)
 
     # Create datasets
-    print("Creating dataset...")
+    print("Creating datasets...")
     train_dataset = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcoco',
@@ -108,14 +103,35 @@ def main():
         size=480,
         precision=args.precision
     )
+    
+    val_dataset = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        image_transforms=image_transforms,
+        max_tokens=30,
+        split='val',
+        eval_mode=True,
+        size=480,
+        precision=args.precision
+    )
 
     # Create data loaders
-    print("Creating data loader...")
+    print("Creating data loaders...")
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
         shuffle=True,
-        num_workers=0,  # 减少 worker 数量
+        num_workers=0,
+        pin_memory=True
+    )
+    
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=0,
         pin_memory=True
     )
 
@@ -126,6 +142,10 @@ def main():
         lr=args.lr,
         weight_decay=args.weight_decay
     )
+
+    # Initialize best metrics
+    best_ciou = 0
+    best_giou = 0
 
     # Training loop
     print("Starting training...")
@@ -139,7 +159,7 @@ def main():
                 img = samples['img'].to(device, non_blocking=True)
                 word_ids = samples['word_ids'].to(device, non_blocking=True)
                 word_masks = samples['word_masks'].to(device, non_blocking=True)
-                target = targets['mask'].to(device, non_blocking=True)
+                target = targets['mask'].to(device, non_blocking=True).squeeze(1)
 
                 # Forward pass
                 loss_dict = model(img, word_ids, word_masks, target)
@@ -162,6 +182,16 @@ def main():
                 del img, word_ids, word_masks, target, loss_dict, loss
                 torch.cuda.empty_cache()
 
+        # Validation
+        print(f"\nValidating epoch {epoch+1}...")
+        metrics = validate(model, val_loader, device)
+        print(f"Validation metrics:")
+        print(f"mIoU: {metrics['mIoU']:.4f}")
+        print(f"IoU: {metrics['IoU']:.4f}")
+        print(f"pointM: {metrics['pointM']:.4f}")
+        print(f"best_cIoU: {metrics['best_cIoU']:.4f}")
+        print(f"best_gIoU: {metrics['best_gIoU']:.4f}")
+
         # Save checkpoint
         print(f"Saving checkpoint for epoch {epoch+1}...")
         checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
@@ -170,7 +200,42 @@ def main():
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'loss': total_loss / len(train_loader),
+            'metrics': metrics
         }, checkpoint_path)
+
+        # Save best model based on cIoU and gIoU
+        if metrics['best_cIoU'] > best_ciou:
+            best_ciou = metrics['best_cIoU']
+            best_ciou_path = os.path.join(args.output_dir, 'best_ciou_model.pt')
+            # Delete previous best cIoU model if exists
+            if os.path.exists(best_ciou_path):
+                os.remove(best_ciou_path)
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'metrics': metrics
+            }, best_ciou_path)
+            print(f"Saved new best cIoU model with score: {best_ciou:.4f}")
+
+        if metrics['best_gIoU'] > best_giou:
+            best_giou = metrics['best_gIoU']
+            best_giou_path = os.path.join(args.output_dir, 'best_giou_model.pt')
+            # Delete previous best gIoU model if exists
+            if os.path.exists(best_giou_path):
+                os.remove(best_giou_path)
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'metrics': metrics
+            }, best_giou_path)
+            print(f"Saved new best gIoU model with score: {best_giou:.4f}")
+
+        # Delete previous epoch checkpoint
+        prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}.pt')
+        if os.path.exists(prev_checkpoint):
+            os.remove(prev_checkpoint)
 
 if __name__ == '__main__':
     main() 
