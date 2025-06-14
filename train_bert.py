@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -153,7 +154,7 @@ def main():
         model.train()
         total_loss = 0
         
-        with tqdm(train_loader, desc=f'Epoch {epoch+1}/{args.epochs}') as pbar:
+        with tqdm(train_loader, disable=not sys.stdout.isatty(),desc=f'Epoch {epoch+1}/{args.epochs}') as pbar:
             for samples, targets in pbar:
                 # Move data to device
                 img = samples['img'].to(device, non_blocking=True)

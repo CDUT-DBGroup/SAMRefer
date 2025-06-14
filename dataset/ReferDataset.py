@@ -176,21 +176,11 @@ class ReferDataset(data.Dataset):
             target = annot
 
         if self.eval_mode:
-            embedding = []
-            att = []
-            sentences = []
-
-            for s in range(len(self.input_ids[index])):
-                e = self.input_ids[index][s]
-                a = self.word_masks[index][s]
-                sent = self.all_sentences[index][s]
-
-                embedding.append(e.unsqueeze(-1))
-                att.append(a.unsqueeze(-1))
-                sentences.append(sent)
-
-            word_ids = torch.cat(embedding, dim=-1)
-            word_masks = torch.cat(att, dim=-1)
+            # In eval mode, we still only use one sentence to ensure consistent batch sizes
+            choice_sent = 0  # Use the first sentence for evaluation
+            word_ids = self.input_ids[index][choice_sent]
+            word_masks = self.word_masks[index][choice_sent]
+            sentences = self.all_sentences[index][choice_sent]
         else:
             choice_sent = np.random.choice(len(self.input_ids[index]))
             word_ids = self.input_ids[index][choice_sent]
