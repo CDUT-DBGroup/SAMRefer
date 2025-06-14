@@ -142,7 +142,7 @@ def main():
         precision='fp32',
         clip_path=None,
         ck_bert='bert-base-uncased',
-        model_path='output/refersam_bert/best_ciou_model.pt'  # Path to the trained model
+        model_path='output/refersam_bert/checkpoint_epoch_1.pt'  # Path to the trained model
     )
 
     # Create output directory
@@ -170,8 +170,8 @@ def main():
     
     # Load trained model weights
     print(f"Loading model weights from {args.model_path}")
-    # checkpoint = torch.load(args.model_path, map_location=device)
-    # model.load_state_dict(checkpoint['model_state_dict'])
+    checkpoint = torch.load(args.model_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
     model = model.to(device)
     model.eval()  # Set model to evaluation mode
 

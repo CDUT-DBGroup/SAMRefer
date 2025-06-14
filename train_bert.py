@@ -14,6 +14,31 @@ from model.models.refersam import ReferSAM
 from model.segment_anything.build_sam import sam_model_registry
 from model.criterion import SegMaskLoss
 from evaluation import validate
+import logging
+import datetime
+import random
+
+def set_seed(seed=123456):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+set_seed()
+# Configure logging
+def setup_logger(output_dir):
+    log_file = os.path.join(output_dir, f'training_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+    return logging.getLogger(__name__)
 
 def count_parameters(model):
     total_params = sum(p.numel() for p in model.parameters())
@@ -57,10 +82,18 @@ def main():
 
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Setup logger
+    logger = setup_logger(args.output_dir)
+    logger.info("Starting training with configuration:")
+    logger.info(f"Batch size: {args.batch_size}")
+    logger.info(f"Epochs: {args.epochs}")
+    logger.info(f"Learning rate: {args.lr}")
+    logger.info(f"Weight decay: {args.weight_decay}")
 
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
 
     # Initialize models and criterion
     print("Initializing models...")
@@ -149,13 +182,15 @@ def main():
     best_giou = 0
 
     # Training loop
-    print("Starting training...")
+    logger.info("Starting training...")
     for epoch in range(args.epochs):
         model.train()
         total_loss = 0
+        total_mask_loss = 0
+        total_dice_loss = 0
         
         with tqdm(train_loader, disable=not sys.stdout.isatty(),desc=f'Epoch {epoch+1}/{args.epochs}') as pbar:
-            for samples, targets in pbar:
+            for batch_idx, (samples, targets) in enumerate(pbar):
                 # Move data to device
                 img = samples['img'].to(device, non_blocking=True)
                 word_ids = samples['word_ids'].to(device, non_blocking=True)
@@ -173,28 +208,39 @@ def main():
 
                 # Update progress bar
                 total_loss += loss.item()
+                total_mask_loss += loss_dict['loss_mask'].item()
+                total_dice_loss += loss_dict['loss_dice'].item()
+
+                current_loss = total_loss / (batch_idx + 1)
+                current_mask_loss = total_mask_loss / (batch_idx + 1)
+                current_dice_loss = total_dice_loss / (batch_idx + 1)
+
                 pbar.set_postfix({
-                    'loss': total_loss / (pbar.n + 1),
-                    'mask_loss': loss_dict['loss_mask'].item(),
-                    'dice_loss': loss_dict['loss_dice'].item()
+                    'loss': current_loss,
+                    'mask_loss': current_mask_loss,
+                    'dice_loss': current_dice_loss
                 })
 
+                if (batch_idx + 1) % 100 == 0:  # 每100个batch记录一次
+                    logger.info(f"Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
+                                f"Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - "
+                                f"Dice Loss: {current_dice_loss:.4f}")
                 # Clear memory
-                del img, word_ids, word_masks, target, loss_dict, loss
+                # del img, word_ids, word_masks, target, loss_dict, loss
                 torch.cuda.empty_cache()
 
         # Validation
-        print(f"\nValidating epoch {epoch+1}...")
+        logger.info(f"\nValidating epoch {epoch+1}...")
         metrics = validate(model, val_loader, device)
-        print(f"Validation metrics:")
-        print(f"mIoU: {metrics['mIoU']:.4f}")
-        print(f"IoU: {metrics['IoU']:.4f}")
-        print(f"pointM: {metrics['pointM']:.4f}")
-        print(f"best_cIoU: {metrics['best_cIoU']:.4f}")
-        print(f"best_gIoU: {metrics['best_gIoU']:.4f}")
+        logger.info(f"Validation metrics for epoch {epoch+1}:")
+        logger.info(f"mIoU: {metrics['mIoU']:.4f}")
+        logger.info(f"IoU: {metrics['IoU']:.4f}")
+        logger.info(f"pointM: {metrics['pointM']:.4f}")
+        logger.info(f"best_cIoU: {metrics['best_cIoU']:.4f}")
+        logger.info(f"best_gIoU: {metrics['best_gIoU']:.4f}")
 
         # Save checkpoint
-        print(f"Saving checkpoint for epoch {epoch+1}...")
+        logger.info(f"Saving checkpoint for epoch {epoch+1}...")
         checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
         torch.save({
             'epoch': epoch + 1,
@@ -217,7 +263,7 @@ def main():
                 'optimizer_state_dict': optimizer.state_dict(),
                 'metrics': metrics
             }, best_ciou_path)
-            print(f"Saved new best cIoU model with score: {best_ciou:.4f}")
+            logger.info(f"Saved new best cIoU model with score: {best_ciou:.4f}")
 
         if metrics['best_gIoU'] > best_giou:
             best_giou = metrics['best_gIoU']
@@ -231,7 +277,7 @@ def main():
                 'optimizer_state_dict': optimizer.state_dict(),
                 'metrics': metrics
             }, best_giou_path)
-            print(f"Saved new best gIoU model with score: {best_giou:.4f}")
+            logger.info(f"Saved new best gIoU model with score: {best_giou:.4f}")
 
         # Delete previous epoch checkpoint
         prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}.pt')
