@@ -12,6 +12,27 @@ from transformers import BertTokenizer, BertModel
 from transformers import CLIPTextModel, CLIPTokenizer
 # sentence = 'new_sentenc'
 sentence = 'sentences'
+
+from torchvision import transforms
+
+class ImageMaskTransform:
+    def __init__(self, size):
+        self.size = size
+        self.image_transform = transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        self.mask_transform = transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor()
+        ])
+
+    def __call__(self, img, mask):
+        img = self.image_transform(img)
+        mask = self.mask_transform(mask)
+        return img, mask
+
 def pil_resize(img, size, order):
     if size[0] == img.shape[0] and size[1] == img.shape[1]:
         return img
@@ -36,7 +57,7 @@ class ReferDataset(data.Dataset):
                  dataset='refcoco',
                  splitBy='unc',
                  bert_tokenizer='clip',
-                 image_transforms=None,
+                 image_transforms=ImageMaskTransform(size=480),
                  max_tokens=30,
                  split='train',
                  eval_mode=True,
@@ -155,25 +176,26 @@ class ReferDataset(data.Dataset):
         this_img_id = self.refer.getImgIds(this_ref_id)
         this_img = self.refer.Imgs[this_img_id[0]]
 
-        img_path = os.path.join(self.refer.IMAGE_DIR, this_img['file_name'])
-        img = Image.open(img_path).convert("RGB")
+        img_full_path = os.path.join(self.refer.IMAGE_DIR, this_img['file_name'])
+        img = Image.open(img_full_path).convert("RGB")
 
         ref = self.refer.loadRefs(this_ref_id)[0]
 
         bbox = self.refer.Anns[ref['ann_id']]['bbox']
         bbox = np.array(bbox, dtype=int)
         bbox[2], bbox[3] = bbox[0] + bbox[2], bbox[1] + bbox[3]
-
         ref_mask = np.array(self.refer.getMask(ref)['mask'])
         annot = np.zeros(ref_mask.shape)
         annot[ref_mask == 1] = 1
         annot = Image.fromarray(annot.astype(np.uint8), mode="P")
-
+        h, w = ref_mask.shape
         if self.image_transforms is not None:
-            h, w = ref_mask.shape
             img, target = self.image_transforms(img, annot)
         else:
             target = annot
+            img = F.to_tensor(img)
+            target = F.to_tensor(target)
+
 
         if self.eval_mode:
             # In eval mode, we still only use one sentence to ensure consistent batch sizes
@@ -187,8 +209,7 @@ class ReferDataset(data.Dataset):
             word_masks = self.word_masks[index][choice_sent]
             sentences = self.all_sentences[index][choice_sent]
 
-        img_path_full = this_img['file_name']
-        img_path = int(img_path_full.split('.')[0].split('_')[-1])
+        img_path = int(img_full_path.split('.')[0].split('_')[-1])
 
         # Convert tensors to specified dtype
         img = img.to(dtype=self.torch_dtype)
@@ -209,28 +230,8 @@ class ReferDataset(data.Dataset):
             "sentences": sentences,
             "boxes": bbox,
             "orig_size": np.array([h, w]),
-            "img_path_full": img_path_full
+            "img_full_path": img_full_path
         }
 
         return samples, targets
 
-
-if __name__ == '__main__':
-    from transform import get_transform
-    import numpy as np
-    import json
-    from torch.utils.data import DataLoader
-
-    refcoco_train = ReferDataset(dataset='refcoco', splitBy='unc', split='train', refer_data_root='/vision_paper/paper_data/coco_data/', eval_mode=False,negative_samples=3,
-                                 image_transforms=get_transform(320, train=False))
-    refcoco_train.__getitem__(1)
-    # train_loader = DataLoader(refcoco_train,
-    #                           batch_size=12,
-    #                           num_workers=2,
-    #                           pin_memory=True,
-    #                           sampler=None)
-    # print('要进入循环了')
-    # for idx, (img, target, bbox, word_ids, word_mask, _, raw_sentences) in enumerate(train_loader):
-    #     print(idx, img.shape)
-    #
-    #     if idx > 10: break

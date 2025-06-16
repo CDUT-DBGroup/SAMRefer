@@ -3,6 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from ..vit_adapter import *
+    
 
 class ReferSAM(nn.Module):
     def __init__(self, sam_model, text_encoder, args, num_classes=1, criterion=None, **kwargs):

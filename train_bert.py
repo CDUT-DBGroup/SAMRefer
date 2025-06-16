@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-from torchvision import transforms
 import argparse
 from tqdm import tqdm
 import numpy as np
@@ -45,39 +44,22 @@ def count_parameters(model):
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total_params, trainable_params
 
-class ImageMaskTransform:
-    def __init__(self, size):
-        self.size = size
-        self.image_transform = transforms.Compose([
-            transforms.Resize((size, size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        self.mask_transform = transforms.Compose([
-            transforms.Resize((size, size)),
-            transforms.ToTensor()
-        ])
-
-    def __call__(self, img, mask):
-        img = self.image_transform(img)
-        mask = self.mask_transform(mask)
-        return img, mask
 
 def main():
     # Fixed arguments for BERT configuration
     args = argparse.Namespace(
-        batch_size=8,
-        epochs=40,
+        batch_size=16,
+        epochs=15,
         lr=2e-5,
         weight_decay=0.01,
-        data_root='/root/autodl-tmp/paper_data/coco_data',
+        data_root='/public/home/2023020919/vision_paper/paper_data/coco_data',
         output_dir='output/refersam_bert',
         model_type='vit_b',
-        checkpoint='/root/autodl-tmp/paper_data/weight/sam/sam_vit_b_01ec64.pth',
+        checkpoint='/public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth',
         tokenizer_type='bert',
         precision='fp32',
         clip_path=None,
-        ck_bert='bert-base-uncased'
+        ck_bert='/public/home/2023020919/vision_paper/samrefer/bert-base-uncased'
     )
 
     # Create output directory
@@ -92,7 +74,7 @@ def main():
     logger.info(f"Weight decay: {args.weight_decay}")
 
     # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
 
     # Initialize models and criterion
@@ -120,9 +102,6 @@ def main():
     
     model = model.to(device)
 
-    # Define image transforms
-    image_transforms = ImageMaskTransform(size=480)
-
     # Create datasets
     print("Creating datasets...")
     train_dataset = ReferDataset(
@@ -130,7 +109,6 @@ def main():
         dataset='refcoco',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
-        image_transforms=image_transforms,
         max_tokens=30,
         split='train',
         eval_mode=False,
@@ -227,7 +205,7 @@ def main():
                                 f"Dice Loss: {current_dice_loss:.4f}")
                 # Clear memory
                 # del img, word_ids, word_masks, target, loss_dict, loss
-                torch.cuda.empty_cache()
+                # torch.cuda.empty_cache()
 
         # Validation
         logger.info(f"\nValidating epoch {epoch+1}...")
