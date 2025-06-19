@@ -1,0 +1,16 @@
+batch_size: 12
+epochs: 15
+lr: 2e-5
+weight_decay: 0.01
+
+data_root: /public/home/2023020919/vision_paper/paper_data/coco_data
+output_dir: output/refersam_bert
+
+sam_type: vit_b
+checkpoint: /public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth
+
+tokenizer_type: bert
+ck_bert: /public/home/2023020919/vision_paper/samrefer/bert-base-uncased
+clip_path: null
+
+precision: fp32

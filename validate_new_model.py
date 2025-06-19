@@ -9,8 +9,8 @@ from tqdm import tqdm
 import numpy as np
 from transformers import BertTokenizer, BertModel
 from dataset.ReferDataset import ReferDataset
-from model.builder import refersam
-from model.models.refersam import ReferSAM
+from get_args import get_args
+from model.models.new_model import ReferSAM
 from model.segment_anything.build_sam import sam_model_registry
 from model.criterion import SegMaskLoss
 from evaluation import validate
@@ -130,34 +130,31 @@ class ImageMaskTransform:
 
 def main():
     # Fixed arguments for BERT configuration
-    args = argparse.Namespace(
-        epochs=40,
-        lr=2e-5,
-        weight_decay=0.01,
-        batch_size=8,
-        data_root='/public/home/2023020919/vision_paper/paper_data/coco_data',
-        output_dir='output/refersam_bert',
-        sam_type='vit_b',
-        checkpoint='/public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth',
-        tokenizer_type='bert',
-        precision='fp32',
-        clip_path=None,
-        ck_bert='/public/home/2023020919/vision_paper/samrefer/bert-base-uncased',
-        pre_train_path='output/refersam_bert/checkpoint_epoch_2.pt'  # Path to the trained model
-    )
+    args = get_args()
 
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Set device
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     # Initialize models and criterion
     print("Initializing models...")
-    model = refersam(args=args, pretrained=True)
+    sam = sam_model_registry[args.sam_type](checkpoint=args.checkpoint)
+    text_model = BertModel.from_pretrained(args.ck_bert)
+    criterion = SegMaskLoss(num_points=112*112, oversample_ratio=3.0, importance_sample_ratio=0.75)
+
+    # Create model
+    print("Creating ReferSAM model...")
+    model = ReferSAM(
+        sam_model=sam,
+        text_encoder=text_model,
+        args=args,
+        num_classes=1,
+        criterion=criterion
+    )
     # Load trained model weights
-    print(f"Loading model weights from {args.model_path}")
     model.eval()  # Set model to evaluation mode
 
     # Print model parameters

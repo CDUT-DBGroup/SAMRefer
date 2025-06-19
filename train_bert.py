@@ -1,17 +1,13 @@
 import os
 import sys
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
-import argparse
 from tqdm import tqdm
 import numpy as np
-from transformers import BertTokenizer, BertModel
 from dataset.ReferDataset import ReferDataset
-from model.models.refersam import ReferSAM
-from model.segment_anything.build_sam import sam_model_registry
-from model.criterion import SegMaskLoss
+import get_args
+from model.builder import refersam
 from evaluation import validate
 import logging
 import datetime
@@ -47,20 +43,7 @@ def count_parameters(model):
 
 def main():
     # Fixed arguments for BERT configuration
-    args = argparse.Namespace(
-        batch_size=16,
-        epochs=15,
-        lr=2e-5,
-        weight_decay=0.01,
-        data_root='/public/home/2023020919/vision_paper/paper_data/coco_data',
-        output_dir='output/refersam_bert',
-        model_type='vit_b',
-        checkpoint='/public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth',
-        tokenizer_type='bert',
-        precision='fp32',
-        clip_path=None,
-        ck_bert='/public/home/2023020919/vision_paper/samrefer/bert-base-uncased'
-    )
+    args = get_args()
 
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
@@ -77,33 +60,20 @@ def main():
     device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
 
-    # Initialize models and criterion
-    print("Initializing models...")
-    sam = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
-    text_model = BertModel.from_pretrained(args.ck_bert)
-    criterion = SegMaskLoss(num_points=112*112, oversample_ratio=3.0, importance_sample_ratio=0.75)
-
-    # Create model
-    print("Creating ReferSAM model...")
-    model = ReferSAM(
-        sam_model=sam,
-        text_encoder=text_model,
-        args=args,
-        num_classes=1,
-        criterion=criterion
-    )
+    logger.info("Creating ReferSAM model...")
+    model = refersam(args=args)
     
     # Print model parameters
     total_params, trainable_params = count_parameters(model)
-    print(f"\nModel Parameters:")
-    print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
-    print(f"Non-trainable parameters: {total_params - trainable_params:,}")
+    logger.info(f"\nModel Parameters:")
+    logger.info(f"Total parameters: {total_params:,}")
+    logger.info(f"Trainable parameters: {trainable_params:,}")
+    logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
     
     model = model.to(device)
 
     # Create datasets
-    print("Creating datasets...")
+    logger.info("Creating datasets...")
     train_dataset = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcoco',
@@ -121,7 +91,6 @@ def main():
         dataset='refcoco',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
-        image_transforms=image_transforms,
         max_tokens=30,
         split='val',
         eval_mode=True,
@@ -130,7 +99,7 @@ def main():
     )
 
     # Create data loaders
-    print("Creating data loaders...")
+    logger.info("Creating data loaders...")
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
@@ -148,12 +117,14 @@ def main():
     )
 
     # Initialize optimizer
-    print("Initializing optimizer...")
+    logger.info("Initializing optimizer...")
     optimizer = optim.Adam(
         model.parameters(),
         lr=args.lr,
         weight_decay=args.weight_decay
     )
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+
 
     # Initialize best metrics
     best_ciou = 0
@@ -199,13 +170,14 @@ def main():
                     'dice_loss': current_dice_loss
                 })
 
-                if (batch_idx + 1) % 100 == 0:  # 每100个batch记录一次
+                if (batch_idx + 1) % 10 == 0:  # 每10个batch记录一次
                     logger.info(f"Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
                                 f"Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - "
                                 f"Dice Loss: {current_dice_loss:.4f}")
                 # Clear memory
                 # del img, word_ids, word_masks, target, loss_dict, loss
                 # torch.cuda.empty_cache()
+        scheduler.step()
 
         # Validation
         logger.info(f"\nValidating epoch {epoch+1}...")

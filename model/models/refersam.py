@@ -35,6 +35,7 @@ class ReferSAM(nn.Module):
         nn.init.constant_(self.mask_scaling.bias, 0.)
         self.mask_embedding.apply(self._init_weights)
         self.sparse_embedding.apply(self._init_weights)
+        # print(self.params_to_optimize())
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):

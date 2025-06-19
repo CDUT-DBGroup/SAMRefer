@@ -207,7 +207,7 @@ class ReferDataset(data.Dataset):
             choice_sent = np.random.choice(len(self.input_ids[index]))
             word_ids = self.input_ids[index][choice_sent]
             word_masks = self.word_masks[index][choice_sent]
-            sentences = self.all_sentences[index][choice_sent]
+            sentences = self.all_sentences[index][choice_sent]  # 随机挑选一个句子，但是每个句子描述的都是该分割出来的对象
 
         img_path = int(img_full_path.split('.')[0].split('_')[-1])
 

@@ -25,7 +25,8 @@ def _segm_refersam(pretrained, args, criterion):
         "vit_l": {"interaction_indexes": [[0, 5], [6, 11], [12, 17], [18, 23]], "num_heads":16, "vl_dim":1024},
         "vit_b": {"interaction_indexes": [[0, 2], [3, 5], [6, 8], [9, 11]], "num_heads":12, "vl_dim":768},
     }
-    sam_model = sam_model_registry[args.sam_type](pretrained)
+    sam_model = sam_model_registry[args.sam_type](checkpoint=args.checkpoint)
+    # sam_model = 
     adapter_configs = {
         'drop_path_rate':0.0,
         'dropout':0.0,
@@ -44,9 +45,16 @@ def _segm_refersam(pretrained, args, criterion):
         "num_prompt_layers": 2,
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
+    if pretrained is not None:
+        device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+        print(f"Loading model weights from {args.pre_train_path}")
+        checkpoint = torch.load(args.pre_train_path, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model = model.to(device)
+        model.eval()  # Set model to evaluation mode
     return model
 
 
-def refersam(pretrained='', args=None):
+def refersam(pretrained=None, args=None):
     criterion = criterion_dict['mask']()
     return _segm_refersam(pretrained, args, criterion)

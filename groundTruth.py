@@ -5,21 +5,38 @@ import torchvision.transforms.functional as TF
 import torch
 from PIL import Image
 from dataset.ReferDataset import ReferDataset
-def visualize_sample(samples, targets, save_path='debug_output.png'):
+from get_args import get_args
+from model.builder import refersam
+from model.models.new_model import ReferSAM
+from model.segment_anything.build_sam import sam_model_registry
+from model.criterion import SegMaskLoss
+from transformers import BertTokenizer, BertModel
+import torch.nn.functional as F
+"""
+可以加载单张图片成为gt
+"""
+def visualize_sample(samples, targets, model=None, save_path='debug_output.png'):
     img_tensor = samples['img']
+    # img_tensor = TF.resize(img_tensor, size=[1024, 1024])  # (C, H, W)
+
     mask = targets['mask']
+    word_id = samples['word_ids']
+    word_mask = samples['word_masks']
     sentence = samples['text']
     img_path = targets['img_full_path']
 
-    
-    # 从 Tensor 转为 PIL Image（确保图像维度是 [C, H, W]）
+    # 模型推理
+    model.eval()
+    with torch.no_grad():
+        pred_mask = model(img_tensor.unsqueeze(0), word_id.unsqueeze(0), word_mask.unsqueeze(0))
+        # resized_mask_tensor = F.interpolate(pred_mask.unsqueeze(1).float(), size=(480, 480), mode='bilinear', align_corners=False)
+        pred_mask = pred_mask.squeeze(0).cpu().numpy()  # [H, W]
+    # 处理图像
     if isinstance(img_tensor, torch.Tensor):
         img = TF.to_pil_image(img_tensor.cpu())
     else:
         img = img_tensor
-    # img = Image.open(img_path).convert('RGB')
 
-    # 如果 mask 是 torch.Tensor，则转为 numpy array
     if isinstance(mask, torch.Tensor):
         mask_np = mask.cpu().numpy()
     else:
@@ -28,22 +45,33 @@ def visualize_sample(samples, targets, save_path='debug_output.png'):
     if mask_np.ndim == 3 and mask_np.shape[0] == 1:
         mask_np = mask_np.squeeze(0)
 
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(15, 6))
 
-    plt.subplot(1, 3, 1)
+    plt.subplot(1, 5, 1)
     plt.imshow(img)
     plt.title(f'Image\n{img_path}')
     plt.axis('off')
 
-    plt.subplot(1, 3, 2)
+    plt.subplot(1, 5, 2)
     plt.imshow(mask_np, cmap='gray')
     plt.title('Ground Truth Mask')
     plt.axis('off')
 
-    plt.subplot(1, 3, 3)
+    plt.subplot(1, 5, 3)
     plt.imshow(img)
     plt.imshow(mask_np, cmap='jet', alpha=0.5)
-    plt.title(f'Mask Overlay\n"{sentence}"')
+    plt.title(f'GT Overlay\n"{sentence}"')
+    plt.axis('off')
+
+    plt.subplot(1, 5, 4)
+    plt.imshow(pred_mask, cmap='gray')
+    plt.title('Predicted Mask')
+    plt.axis('off')
+
+    plt.subplot(1, 5, 5)
+    plt.imshow(img)
+    plt.imshow(pred_mask, cmap='jet', alpha=0.5)
+    plt.title(f'Pred Overlay\n"{sentence}"')
     plt.axis('off')
 
     plt.tight_layout()
@@ -52,16 +80,7 @@ def visualize_sample(samples, targets, save_path='debug_output.png'):
     plt.close()
 
 if __name__ == '__main__':
-    args = argparse.Namespace(
-        data_root='/public/home/2023020919/vision_paper/paper_data/coco_data',
-        output_dir='output/refersam_bert',
-        model_type='vit_b',
-        checkpoint='/public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth',
-        tokenizer_type='bert',
-        precision='fp32',
-        clip_path=None, 
-        ck_bert='/public/home/2023020919/vision_paper/samrefer/bert-base-uncased'
-    )
+    args = get_args()
     dataset = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcoco',
@@ -72,8 +91,30 @@ if __name__ == '__main__':
         eval_mode=False,
         size=480,
         precision=args.precision,
-        image_transforms=None
+        # image_transforms=None
     )
 
     samples, targets = dataset.__getitem__(1)
-    visualize_sample(samples, targets, save_path='sample_debug.png')
+
+
+    # print("Creating ReferSAM model...")
+    # # Initialize models and criterion
+    # print("Initializing models...")
+    # sam = sam_model_registry[args.sam_type](checkpoint=args.checkpoint)
+    # text_model = BertModel.from_pretrained(args.ck_bert)
+    # criterion = SegMaskLoss(num_points=112*112, oversample_ratio=3.0, importance_sample_ratio=0.75)
+
+    # # Create model
+    # print("Creating ReferSAM model...")
+    # model = ReferSAM(
+    #     sam_model=sam,
+    #     text_encoder=text_model,
+    #     args=args,
+    #     num_classes=1,
+    #     criterion=criterion
+    # )
+    model = refersam(args=args)
+    # Load trained model weights
+    model.eval()  # Set model to evaluation mode
+
+    visualize_sample(samples, targets, model=model,save_path='sample_debug.png')
