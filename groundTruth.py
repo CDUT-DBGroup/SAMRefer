@@ -16,12 +16,12 @@ import torch.nn.functional as F
 可以加载单张图片成为gt
 """
 def visualize_sample(samples, targets, model=None, save_path='debug_output.png'):
-    img_tensor = samples['img']
+    img_tensor = samples['img'].to("cuda")
     # img_tensor = TF.resize(img_tensor, size=[1024, 1024])  # (C, H, W)
 
-    mask = targets['mask']
-    word_id = samples['word_ids']
-    word_mask = samples['word_masks']
+    mask = targets['mask'].to("cuda")
+    word_id = samples['word_ids'].to("cuda")
+    word_mask = samples['word_masks'].to("cuda")
     sentence = samples['text']
     img_path = targets['img_full_path']
 
@@ -89,7 +89,7 @@ if __name__ == '__main__':
         max_tokens=30, 
         split='train',
         eval_mode=False,
-        size=480,
+        size=320,
         precision=args.precision,
         # image_transforms=None
     )
@@ -113,7 +113,7 @@ if __name__ == '__main__':
     #     num_classes=1,
     #     criterion=criterion
     # )
-    model = refersam(args=args)
+    model = refersam(args=args, pretrained=True)
     # Load trained model weights
     model.eval()  # Set model to evaluation mode
 

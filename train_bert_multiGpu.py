@@ -12,6 +12,8 @@ from evaluation import validate
 import logging
 import datetime
 import random
+import torch.nn as nn
+
 
 def set_seed(seed=123456):
     random.seed(seed)
@@ -62,7 +64,7 @@ def main():
 
     logger.info("Creating ReferSAM model...")
     model = refersam(args=args)
-    
+    model = nn.DataParallel(model)  # 多GPU封装
     # Print model parameters
     total_params, trainable_params = count_parameters(model)
     logger.info(f"\nModel Parameters:")

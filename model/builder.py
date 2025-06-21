@@ -5,7 +5,7 @@ from transformers import CLIPTextModel
 
 from .models import *
 from .segment_anything import sam_model_registry
-from .criterion import criterion_dict
+from .criterion import SegMaskLoss, criterion_dict
 
 
 def _segm_refersam(pretrained, args, criterion):
@@ -46,7 +46,7 @@ def _segm_refersam(pretrained, args, criterion):
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     if pretrained is not None:
-        device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         print(f"Loading model weights from {args.pre_train_path}")
         checkpoint = torch.load(args.pre_train_path, map_location=device)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -58,3 +58,19 @@ def _segm_refersam(pretrained, args, criterion):
 def refersam(pretrained=None, args=None):
     criterion = criterion_dict['mask']()
     return _segm_refersam(pretrained, args, criterion)
+
+
+# 获取的是原始的模型
+def get_model(args):
+    sam = sam_model_registry[args.sam_type](checkpoint=args.checkpoint)
+    text_model = BertModel.from_pretrained(args.ck_bert)
+    criterion = SegMaskLoss(num_points=112*112, oversample_ratio=3.0, importance_sample_ratio=0.75)
+
+    model = ReferSAM(
+        sam_model=sam,
+        text_encoder=text_model,
+        args=args,
+        num_classes=1,
+        criterion=criterion
+    )
+    return model

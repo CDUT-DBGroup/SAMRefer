@@ -1,9 +1,13 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-
+from torchvision import transforms
 from ..vit_adapter import *
-    
+import numpy as np
+from PIL import Image
+from torch.nn.init import trunc_normal_
+
+
 
 class ReferSAM(nn.Module):
     def __init__(self, sam_model, text_encoder, args, num_classes=1, criterion=None, **kwargs):
@@ -97,12 +101,11 @@ class ReferSAM(nn.Module):
         dense_pe = self.sam_prompt_encoder.pe_layer(spatial_shape).unsqueeze(0)
         return sparse_embeddings, dense_embeddings, dense_pe
 
-    def forward(self, img, text, l_mask, targets=None, return_probs=False):
+    def forward(self, img, text, l_mask, targets=None, orig_size=None, return_probs=False):
         '''
-            Input:
-                img       [BxCxHxW]
-                text    [BxN_l]
-                l_mask  [BxN_l]
+            img: [B, 3, H, W] tensor
+            targets: [B, 1, H, W] tensor
+            orig_size: [B, 2] numpy array or tensor (H, W)
         '''
         batch_size = img.shape[0]
         input_shape = img.shape[-2:]
@@ -110,18 +113,18 @@ class ReferSAM(nn.Module):
         # Text encoding
         if self.using_clip:
             with torch.no_grad():
-                l_feats = self.text_encoder(text, l_mask)[0] # l_feats: [B, N_l, 768]
+                l_feats = self.text_encoder(text, l_mask)[0]
         else:
-            l_feats = self.text_encoder(text, l_mask)[0] # l_feats: [B, N_l, 768]
+            l_feats = self.text_encoder(text, l_mask)[0]
         # VL pixel decoder
-        adapter_feats_list, vit_feats, l_feats, all_prompts = self.vl_adapter(img, l_feats, l_mask) # vit_feats:[B, C, H/16, W/16]
+        adapter_feats_list, vit_feats, l_feats, all_prompts = self.vl_adapter(img, l_feats, l_mask)
 
-        mask_feature = adapter_feats_list[0] # [B, C, H, W]
-        dense_prompts = all_prompts[:, :1] # [B, 1, C]
-        sparse_prompts = all_prompts[:, 1:] # [B, P, C]
+        mask_feature = adapter_feats_list[0]
+        dense_prompts = all_prompts[:, :1]
+        sparse_prompts = all_prompts[:, 1:]
 
         dense_prompts = self.mask_embedding(dense_prompts)
-        coarse_masks = torch.einsum('bqc,bchw->bqhw', dense_prompts, mask_feature) # [B, 1, H, W]
+        coarse_masks = torch.einsum('bqc,bchw->bqhw', dense_prompts, mask_feature)
         mask_prompt = self.mask_scaling(coarse_masks)
 
         sparse_prompts = self.sparse_embedding(sparse_prompts)
@@ -139,8 +142,22 @@ class ReferSAM(nn.Module):
         coarse_masks = coarse_masks.float()
 
         masks = F.interpolate(low_res_masks, size=input_shape, mode='bilinear', align_corners=True)
-        pred_masks = masks.squeeze(1) # [B, H, W]
-        coarse_masks = coarse_masks.squeeze(1) # [B, H, W]
+        pred_masks = masks.squeeze(1)
+        coarse_masks = coarse_masks.squeeze(1)
+
+        # Upsample to original size if needed
+        if orig_size is not None:
+            # orig_size: numpy array (B, 2) or tensor
+            if isinstance(orig_size, np.ndarray):
+                orig_size = torch.from_numpy(orig_size).to(pred_masks.device)
+            if orig_size.dtype != torch.long:
+                orig_size = orig_size.long()
+            pred_masks_up = []
+            for i in range(pred_masks.shape[0]):
+                h, w = orig_size[i]
+                up = F.interpolate(pred_masks[i:i+1].unsqueeze(1), size=(h, w), mode='bilinear', align_corners=False).squeeze(1)
+                pred_masks_up.append(up)
+            pred_masks = torch.cat(pred_masks_up, dim=0)
 
         if self.training:
             if self.criterion is not None:
@@ -149,5 +166,5 @@ class ReferSAM(nn.Module):
 
         if not return_probs:
             pred_masks = pred_masks.sigmoid()
-            pred_masks = (pred_masks >= 0.5).long()     
+            pred_masks = (pred_masks >= 0.5).long()
         return pred_masks

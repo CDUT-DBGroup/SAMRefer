@@ -10,45 +10,10 @@ from torchvision.transforms import InterpolationMode
 import numpy as np
 from transformers import BertTokenizer, BertModel
 from transformers import CLIPTextModel, CLIPTokenizer
+from torchvision import transforms
 # sentence = 'new_sentenc'
 sentence = 'sentences'
 
-from torchvision import transforms
-
-class ImageMaskTransform:
-    def __init__(self, size):
-        self.size = size
-        self.image_transform = transforms.Compose([
-            transforms.Resize((size, size)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ])
-        self.mask_transform = transforms.Compose([
-            transforms.Resize((size, size)),
-            transforms.ToTensor()
-        ])
-
-    def __call__(self, img, mask):
-        img = self.image_transform(img)
-        mask = self.mask_transform(mask)
-        return img, mask
-
-def pil_resize(img, size, order):
-    if size[0] == img.shape[0] and size[1] == img.shape[1]:
-        return img
-
-    if order == 3:
-        resample = Image.BICUBIC
-    elif order == 0:
-        resample = Image.NEAREST
-
-    return np.asarray(Image.fromarray(img).resize(size[::-1], resample))
-
-
-def pil_rescale(img, scale, order):
-    height, width = img.shape[:2]
-    target_size = (int(np.round(height * scale)), int(np.round(width * scale)))
-    return pil_resize(img, target_size, order)
 
 
 class ReferDataset(data.Dataset):
@@ -57,7 +22,6 @@ class ReferDataset(data.Dataset):
                  dataset='refcoco',
                  splitBy='unc',
                  bert_tokenizer='clip',
-                 image_transforms=ImageMaskTransform(size=480),
                  max_tokens=30,
                  split='train',
                  eval_mode=True,
@@ -84,7 +48,6 @@ class ReferDataset(data.Dataset):
         self.negative_samples = negative_samples
         self.positive_samples = positive_samples
         self.classes = []
-        self.image_transforms = image_transforms
         self.split = split
         self.refer = REFER(refer_data_root, dataset, splitBy)
         self.scales = scales
@@ -111,7 +74,7 @@ class ReferDataset(data.Dataset):
         if self.clip:
             self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
         else:
-            self.tokenizer = BertTokenizer.from_pretrained('/public/home/2023020919/vision_paper/samrefer/bert-base-uncased')
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased/')
 
         ref_ids = self.refer.getRefIds(split=self.split)
         img_ids = self.refer.getImgIds(ref_ids)
@@ -168,6 +131,17 @@ class ReferDataset(data.Dataset):
             self.all_sentences.append(sentence_raw_for_re)
         print('Dataset prepared!')
 
+        self.image_transform = transforms.Compose([
+            transforms.Resize((size, size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        self.mask_transform = transforms.Compose([
+            transforms.Resize((size, size), interpolation=transforms.InterpolationMode.NEAREST),  # 避免插值产生非整数标签
+            transforms.PILToTensor(),       # 保持 int 类型，不归一化
+            transforms.Lambda(lambda x: x.squeeze().long())  # 若是单通道，去掉通道维度并转为 LongTensor
+        ])
+
     def __len__(self):
         return len(self.ref_ids)
 
@@ -189,16 +163,12 @@ class ReferDataset(data.Dataset):
         annot[ref_mask == 1] = 1
         annot = Image.fromarray(annot.astype(np.uint8), mode="P")
         h, w = ref_mask.shape
-        if self.image_transforms is not None:
-            img, target = self.image_transforms(img, annot)
-        else:
-            target = annot
-            img = F.to_tensor(img)
-            target = F.to_tensor(target)
 
+        # 直接transform成tensor
+        img = self.image_transform(img)
+        annot = self.mask_transform(annot)
 
         if self.eval_mode:
-            # In eval mode, we still only use one sentence to ensure consistent batch sizes
             choice_sent = 0  # Use the first sentence for evaluation
             word_ids = self.input_ids[index][choice_sent]
             word_masks = self.word_masks[index][choice_sent]
@@ -207,25 +177,25 @@ class ReferDataset(data.Dataset):
             choice_sent = np.random.choice(len(self.input_ids[index]))
             word_ids = self.input_ids[index][choice_sent]
             word_masks = self.word_masks[index][choice_sent]
-            sentences = self.all_sentences[index][choice_sent]  # 随机挑选一个句子，但是每个句子描述的都是该分割出来的对象
+            sentences = self.all_sentences[index][choice_sent]
 
         img_path = int(img_full_path.split('.')[0].split('_')[-1])
 
-        # Convert tensors to specified dtype
-        img = img.to(dtype=self.torch_dtype)
+        # 转为tensor类型
         word_ids = word_ids.to(dtype=torch.long)
         word_masks = word_masks.to(dtype=torch.long)
-        target = target.to(dtype=torch.float32)  # Changed to float32 for loss computation
+        annot = annot.to(dtype=torch.float32)
 
         samples = {
-            "img": img,
+            "img": img,  # tensor
+            "orig_size": np.array([h, w]),
             "text": sentences,
             "word_ids": word_ids,
             "word_masks": word_masks,
         }
 
         targets = {
-            "mask": target,  # Changed to match SegMaskLoss requirements
+            "mask": annot,  # tensor
             "img_path": img_path,
             "sentences": sentences,
             "boxes": bbox,

@@ -16,6 +16,7 @@ from model.criterion import SegMaskLoss
 from evaluation import validate
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as TF
+from get_args import get_args
 # os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 import random
@@ -130,34 +131,19 @@ class ImageMaskTransform:
 
 def main():
     # Fixed arguments for BERT configuration
-    args = argparse.Namespace(
-        epochs=40,
-        lr=2e-5,
-        weight_decay=0.01,
-        batch_size=8,
-        data_root='/public/home/2023020919/vision_paper/paper_data/coco_data',
-        output_dir='output/refersam_bert',
-        sam_type='vit_b',
-        checkpoint='/public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth',
-        tokenizer_type='bert',
-        precision='fp32',
-        clip_path=None,
-        ck_bert='/public/home/2023020919/vision_paper/samrefer/bert-base-uncased',
-        pre_train_path='output/refersam_bert/checkpoint_epoch_2.pt'  # Path to the trained model
-    )
-
+    args = get_args()
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
 
     # Set device
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
 
     # Initialize models and criterion
     print("Initializing models...")
     model = refersam(args=args, pretrained=True)
     # Load trained model weights
-    print(f"Loading model weights from {args.model_path}")
+    print(f"Loading model weights from {args.pre_train_path}")
     model.eval()  # Set model to evaluation mode
 
     # Print model parameters
@@ -168,7 +154,6 @@ def main():
     print(f"Non-trainable parameters: {total_params - trainable_params:,}")
 
     # Define image transforms
-    image_transforms = ImageMaskTransform(size=480)
 
     # Create validation dataset
     print("Creating validation dataset...")
@@ -177,11 +162,10 @@ def main():
         dataset='refcoco',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
-        image_transforms=image_transforms,
         max_tokens=30,
         split='val',
         eval_mode=True,
-        size=480,
+        size=320,
         precision=args.precision
     )
 
