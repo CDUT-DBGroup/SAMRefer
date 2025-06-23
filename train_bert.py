@@ -125,14 +125,33 @@ def main():
     )
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
-
-    # Initialize best metrics
-    best_ciou = 0
+    # Initialize training state
+    start_epoch = 0
     best_giou = 0
+    best_iou_miou_sum = 0  # 新增
+    
+    # Check for resume training
+    if hasattr(args, 'resume') and args.resume:
+        checkpoint_path = os.path.join(args.output_dir, 'best_giou_model.pt')
+        if os.path.exists(checkpoint_path):
+            logger.info(f"Loading checkpoint from {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            start_epoch = checkpoint['epoch']
+            best_giou = checkpoint['metrics']['best_gIoU']
+            logger.info(f"Resuming from epoch {start_epoch} with best gIoU: {best_giou:.4f}")
+        else:
+            logger.warning(f"Resume flag is set but checkpoint not found at {checkpoint_path}")
+            logger.info("Starting training from scratch")
 
     # Training loop
-    logger.info("Starting training...")
-    for epoch in range(args.epochs):
+    if start_epoch == 0:
+        logger.info("Starting training from epoch 1...")
+    else:
+        logger.info(f"Resuming training from epoch {start_epoch + 1}...")
+    
+    for epoch in range(start_epoch, args.epochs):
         model.train()
         total_loss = 0
         total_mask_loss = 0
@@ -169,8 +188,8 @@ def main():
                     'mask_loss': current_mask_loss,
                     'dice_loss': current_dice_loss
                 })
-                logger.info(f"Sample target stats: min={target.min()}, max={target.max()}, mean={target.float().mean()}")
-                logger.info(f"Sample img stats: min={img.min()}, max={img.max()}, mean={img.float().mean()}")
+                # logger.info(f"Sample target stats: min={target.min()}, max={target.max()}, mean={target.float().mean()}")
+                # logger.info(f"Sample img stats: min={img.min()}, max={img.max()}, mean={img.float().mean()}")
 
 
                 if (batch_idx + 1) % 10 == 0:  # 每10个batch记录一次
@@ -192,32 +211,7 @@ def main():
         logger.info(f"best_cIoU: {metrics['best_cIoU']:.4f}")
         logger.info(f"best_gIoU: {metrics['best_gIoU']:.4f}")
 
-        # Save checkpoint
-        logger.info(f"Saving checkpoint for epoch {epoch+1}...")
-        checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
-        torch.save({
-            'epoch': epoch + 1,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'loss': total_loss / len(train_loader),
-            'metrics': metrics
-        }, checkpoint_path)
-
-        # Save best model based on cIoU and gIoU
-        if metrics['best_cIoU'] > best_ciou:
-            best_ciou = metrics['best_cIoU']
-            best_ciou_path = os.path.join(args.output_dir, 'best_ciou_model.pt')
-            # Delete previous best cIoU model if exists
-            if os.path.exists(best_ciou_path):
-                os.remove(best_ciou_path)
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'metrics': metrics
-            }, best_ciou_path)
-            logger.info(f"Saved new best cIoU model with score: {best_ciou:.4f}")
-
+        # Save best model based on gIoU only
         if metrics['best_gIoU'] > best_giou:
             best_giou = metrics['best_gIoU']
             best_giou_path = os.path.join(args.output_dir, 'best_giou_model.pt')
@@ -230,12 +224,31 @@ def main():
                 'optimizer_state_dict': optimizer.state_dict(),
                 'metrics': metrics
             }, best_giou_path)
-            logger.info(f"Saved new best gIoU model with score: {best_giou:.4f}")
+            logger.info(f"Epoch {epoch+1}/{args.epochs}: Saved new best gIoU model with score: {best_giou:.4f}")
+        else:
+            logger.info(f"Epoch {epoch+1}/{args.epochs}: No improvement in gIoU. Best gIoU remains: {best_giou:.4f}")
 
-        # Delete previous epoch checkpoint
-        prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}.pt')
-        if os.path.exists(prev_checkpoint):
-            os.remove(prev_checkpoint)
+        # 新增：保存 IoU + mIoU 最大的模型
+    iou_miou_sum = metrics['IoU'] + metrics['mIoU']
+    if iou_miou_sum > best_iou_miou_sum:
+        best_iou_miou_sum = iou_miou_sum
+        best_iou_miou_path = os.path.join(args.output_dir, 'best_iou_miou_model.pt')
+        if os.path.exists(best_iou_miou_path):
+            os.remove(best_iou_miou_path)
+        torch.save({
+            'epoch': epoch + 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'metrics': metrics
+        }, best_iou_miou_path)
+        logger.info(f"Epoch {epoch+1}/{args.epochs}: Saved new best (IoU + mIoU) model with sum: {best_iou_miou_sum:.4f}")
+    else:
+        logger.info(f"Epoch {epoch+1}/{args.epochs}: No improvement in (IoU + mIoU). Best sum remains: {best_iou_miou_sum:.4f}")
+
+        # Delete previous epoch checkpoint (no longer saving regular checkpoints)
+        # prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}.pt')
+        # if os.path.exists(prev_checkpoint):
+        #     os.remove(prev_checkpoint)
 
 if __name__ == '__main__':
     main() 

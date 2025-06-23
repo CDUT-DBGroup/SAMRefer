@@ -16,4 +16,4 @@ clip_path: null
 precision: fp32
 use_vl_adapter: False
 
-pre_train_path: /root/autodl-tmp/vision_paper/ReferSAM/output/refersam_bert/checkpoint_epoch_15.pt
+pre_train_path: /root/autodl-tmp/vision_paper/ReferSAM/output/refersam_bert/best_giou_model.pt
