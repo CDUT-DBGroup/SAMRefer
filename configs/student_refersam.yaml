@@ -2,6 +2,8 @@ batch_size: 24
 epochs: 30
 lr: 2e-5
 weight_decay: 0.01
+img_size: 320
+max_tokens: 30
 
 data_root: /public/home/2023020919/vision_paper/paper_data/coco_data
 output_dir: output/refersam_bert
