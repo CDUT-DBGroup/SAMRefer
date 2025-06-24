@@ -1,7 +1,9 @@
 batch_size: 12
-epochs: 15
+epochs: 30
 lr: 2e-5
 weight_decay: 0.01
+img_size: 320
+max_tokens: 30
 
 data_root: /root/autodl-tmp/paper_data/coco_data
 output_dir: output/refersam_bert

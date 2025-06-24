@@ -74,29 +74,80 @@ def main():
 
     # Create datasets
     logger.info("Creating datasets...")
-    train_dataset = ReferDataset(
+    train_dataset_coco = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcoco',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
-        max_tokens=30,
+        max_tokens=args.max_tokens,
         split='train',
         eval_mode=False,
-        size=320,
+        size=args.img_size,
         precision=args.precision
     )
     
-    val_dataset = ReferDataset(
+    val_dataset_coco = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcoco',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
-        max_tokens=30,
+        max_tokens=args.max_tokens,
         split='val',
         eval_mode=True,
-        size=320,
+        size=args.img_size,
         precision=args.precision
     )
+
+    train_dataset_cocoplus = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco+',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=args.max_tokens,
+        split='train',
+        eval_mode=False,
+        size=args.img_size,
+        precision=args.precision
+    )
+    
+    val_dataset_cocoplus = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco+',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=args.max_tokens,
+        split='val',
+        eval_mode=True,
+        size=args.img_size,
+        precision=args.precision
+    )
+
+    train_dataset_cocog = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcocog',
+        splitBy='umd',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=args.max_tokens,
+        split='train',
+        eval_mode=False,
+        size=args.img_size,
+        precision=args.precision
+    )
+    
+    val_dataset_cocog = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcocog',
+        splitBy='umd',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=args.max_tokens,
+        split='val',
+        eval_mode=True,
+        size=args.img_size,
+        precision=args.precision
+    )
+    train_dataset = torch.utils.data.ConcatDataset([train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog])
+    val_dataset = torch.utils.data.ConcatDataset([val_dataset_coco, val_dataset_cocoplus, val_dataset_cocog])
+
 
     # Create data loaders
     logger.info("Creating data loaders...")
