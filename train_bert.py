@@ -57,7 +57,7 @@ def main():
     logger.info(f"Weight decay: {args.weight_decay}")
 
     # Set device
-    device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     logger.info(f"Using device: {device}")
 
     logger.info("Creating ReferSAM model...")
