@@ -18,7 +18,7 @@ def get_args():
     for key, value in config_dict.items():
         arg_type = type(value) if value is not None else str
         parser.add_argument(f'--{key}', type=arg_type, default=value)
-    
+
     # Add resume training parameter
     parser.add_argument('--resume', action='store_true', help='Resume training from checkpoint')
 

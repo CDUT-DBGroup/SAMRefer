@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 train_bert_multiGpu.py # 分布式多GPU训练
