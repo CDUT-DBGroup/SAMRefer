@@ -1,7 +1,0 @@
-Traceback (most recent call last):
-  File "/root/autodl-tmp/vision_paper/ReferSAM/train_bert.py", line 8, in <module>
-    from dataset.ReferDataset import ReferDataset
-  File "/root/autodl-tmp/vision_paper/ReferSAM/dataset/ReferDataset.py", line 11, in <module>
-    from transformers import BertTokenizer, BertModel
-ModuleNotFoundError: No module named 'transformers'
-python: can't open file '/public/home/2023020919/vision_paper/samrefer/train_': [Errno 2] No such file or directory
