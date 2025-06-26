@@ -57,6 +57,11 @@ def main():
     torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{local_rank}")
 
+    from torch.cuda.amp import autocast, GradScaler
+
+    scaler = GradScaler()
+
+
     args = get_args()
     os.makedirs(args.output_dir, exist_ok=True)
     logger = setup_logger(args.output_dir, rank)
@@ -163,14 +168,14 @@ def main():
         train_dataset,
         batch_size=args.batch_size,
         sampler=train_sampler,
-        num_workers=0,
+        num_workers=8,
         pin_memory=True
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         sampler=val_sampler,
-        num_workers=0,
+        num_workers=4,
         pin_memory=True
     )
 
@@ -193,6 +198,9 @@ def main():
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         if 'scheduler_state_dict' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        if 'torch_amp_scaler' in checkpoint:
+            scaler.load_state_dict(checkpoint['torch_amp_scaler'])
+
         start_epoch = checkpoint.get('epoch', 0)
         best_iou_miou_sum = checkpoint.get('best_iou_miou_sum', 0)
         logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
@@ -222,11 +230,13 @@ def main():
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)
             orig_size = samples['orig_size']
-            loss_dict = model(img, word_ids, word_masks, target)
-            loss = loss_dict['total_loss']
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+            with autocast():
+                loss_dict = model(img, word_ids, word_masks, target)
+                loss = loss_dict['total_loss']
+            # AMP backward + optimizer step
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
             total_loss += loss.item()
             total_mask_loss += loss_dict['loss_mask'].item()
             total_dice_loss += loss_dict['loss_dice'].item()
@@ -255,20 +265,7 @@ def main():
             logger.info(f"mIoU: {metrics['mIoU']:.4f}")
             logger.info(f"IoU: {metrics['IoU']:.4f}")
             logger.info(f"pointM: {metrics['pointM']:.4f}")
-            logger.info(f"best_cIoU: {metrics['best_cIoU']:.4f}")
-            logger.info(f"best_gIoU: {metrics['best_gIoU']:.4f}")
-            # Save checkpoint for resume
-            os.makedirs(args.output_dir, exist_ok=True)
-            checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
-            torch.save({
-                'epoch': epoch + 1,
-                'model_state_dict': model.module.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'loss': total_loss / len(train_loader),
-                'metrics': metrics,
-                'best_iou_miou_sum': best_iou_miou_sum
-            }, checkpoint_path)
+            logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
             # Save best iou+miou model
             iou_miou_sum = metrics['IoU'] + metrics['mIoU']
             if iou_miou_sum > best_iou_miou_sum:
@@ -277,16 +274,35 @@ def main():
                 best_path = os.path.join(args.output_dir, 'best_iou_miou_model.pt')
                 if os.path.exists(best_path):
                     os.remove(best_path)
+                # torch.save({
+                #     'epoch': epoch + 1,
+                #     'model_state_dict': model.module.state_dict(),
+                #     'optimizer_state_dict': optimizer.state_dict(),
+                #     'scheduler_state_dict': scheduler.state_dict(),
+                #     'metrics': metrics,
+                #     'best_iou_miou_sum': best_iou_miou_sum
+                # }, best_path)
                 torch.save({
                     'epoch': epoch + 1,
                     'model_state_dict': model.module.state_dict(),
                     'optimizer_state_dict': optimizer.state_dict(),
                     'scheduler_state_dict': scheduler.state_dict(),
-                    'metrics': metrics,
+                    'torch_amp_scaler': scaler.state_dict(),
                     'best_iou_miou_sum': best_iou_miou_sum
                 }, best_path)
+
                 logger.info(f"Saved new best iou+miou model with score: {best_iou_miou_sum:.4f}")
+            os.makedirs(args.output_dir, exist_ok=True)
+            current_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
             prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}.pt')
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.module.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'torch_amp_scaler': scaler.state_dict(),
+                'best_iou_miou_sum': best_iou_miou_sum
+            }, current_checkpoint)
             if os.path.exists(prev_checkpoint):
                 os.remove(prev_checkpoint)
             # 打印当前 best_iou_miou_model.pt 的 epoch 和指标
@@ -300,4 +316,6 @@ def main():
     dist.destroy_process_group()
 
 if __name__ == '__main__':
+    import torch.multiprocessing as mp
+    mp.set_start_method('fork', force=True)
     main() 
