@@ -125,14 +125,13 @@ def main():
     print(f"mIoU: {metrics['mIoU']:.4f}")
     print(f"IoU: {metrics['IoU']:.4f}")
     print(f"pointM: {metrics['pointM']:.4f}")
-    print(f"best_cIoU: {metrics['best_cIoU']:.4f}")
-    print(f"best_gIoU: {metrics['best_gIoU']:.4f}")
+    print(f"best_IoU: {metrics['best_IoU']:.4f}")
     # 可视化前两张预测结果
     print("\nGenerating visualization for first 2 samples...")
     model.eval()
     with torch.no_grad():
         vis_count = 0
-        for batch_idx, batch in enumerate(val_loader):
+        for batch_idx, batch, target in enumerate(val_loader):
             images = batch[batch_idx]['img'].to(device)
             word_ids = batch[batch_idx]['word_ids'].to(device, non_blocking=True)
             word_masks = batch[batch_idx]['word_masks'].to(device)
@@ -141,6 +140,8 @@ def main():
             preds = model(images, word_ids, word_masks)
             pred_masks = (preds > 0.5).float()
             visualize_prediction(images, pred_masks)
+            if vis_count==1:
+                break
 
 if __name__ == '__main__':
     main() 

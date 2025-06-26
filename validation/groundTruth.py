@@ -7,10 +7,7 @@ from PIL import Image
 from dataset.ReferDataset import ReferDataset
 from get_args import get_args
 from model.builder import refersam
-from model.models.new_model import ReferSAM
 from model.segment_anything.build_sam import sam_model_registry
-from model.criterion import SegMaskLoss
-from transformers import BertTokenizer, BertModel
 import torch.nn.functional as F
 """
 可以加载单张图片成为gt,主要用于单张图片的可视化
