@@ -13,7 +13,7 @@ from model.criterion import SegMaskLoss
 from transformers import BertTokenizer, BertModel
 import torch.nn.functional as F
 """
-可以加载单张图片成为gt
+可以加载单张图片成为gt,主要用于单张图片的可视化
 """
 def visualize_sample(samples, targets, model=None, save_path='debug_output.png'):
     img_tensor = samples['img'].to("cuda")

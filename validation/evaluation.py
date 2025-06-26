@@ -3,32 +3,61 @@ import torch.nn.functional as F
 import numpy as np
 from tqdm import tqdm
 
+
 def calculate_iou(pred_mask, target_mask, thresholded=False):
-    """
-    Calculate IoU between prediction and target masks.
-    If thresholded=False, pred_mask is float probabilities [0,1], target_mask is binary {0,1}.
-    If thresholded=True, pred_mask is binary mask.
-    """
+    if not isinstance(pred_mask, torch.Tensor):
+        pred_mask = torch.tensor(pred_mask)
+    if not isinstance(target_mask, torch.Tensor):
+        target_mask = torch.tensor(target_mask)
+
+    device = pred_mask.device
+    target_mask = target_mask.to(device)
+
     if thresholded:
         pred_mask = pred_mask.bool()
         target_mask = target_mask.bool()
-        
         intersection = (pred_mask & target_mask).float().sum()
         union = (pred_mask | target_mask).float().sum()
     else:
-        # 软IoU计算，直接用概率乘积计算交集，概率和计算并集
         intersection = (pred_mask * target_mask).sum()
         union = pred_mask.sum() + target_mask.sum() - intersection
 
     if union == 0:
-        return 0
+        return 1.0 if intersection == 0 else 0.0
     return (intersection / union).item()
 
 
-def calculate_miou(pred_masks, target_masks):
-    """Calculate mean IoU across all samples in a batch"""
-    ious = [calculate_iou(pred, target) for pred, target in zip(pred_masks, target_masks)]
+def calculate_miou(pred_masks, target_masks, thresholded=False):
+    ious = [calculate_iou(pred, target, thresholded=thresholded) for pred, target in zip(pred_masks, target_masks)]
     return np.mean(ious)
+
+
+# def calculate_iou(pred_mask, target_mask, thresholded=False):
+#     """
+#     Calculate IoU between prediction and target masks.
+#     If thresholded=False, pred_mask is float probabilities [0,1], target_mask is binary {0,1}.
+#     If thresholded=True, pred_mask is binary mask.
+#     """
+#     if thresholded:
+#         pred_mask = pred_mask.bool()
+#         target_mask = target_mask.bool()
+        
+#         intersection = (pred_mask & target_mask).float().sum()
+#         union = (pred_mask | target_mask).float().sum()
+#     else:
+#         # 软IoU计算，直接用概率乘积计算交集，概率和计算并集
+#         intersection = (pred_mask * target_mask).sum()
+#         union = pred_mask.sum() + target_mask.sum() - intersection
+
+#     if union == 0:
+#         return 0
+#     return (intersection / union).item()
+
+
+# def calculate_miou(pred_masks, target_masks):
+#     """Calculate mean IoU across all samples in a batch"""
+#     ious = [calculate_iou(pred, target) for pred, target in zip(pred_masks, target_masks)]
+#     return np.mean(ious)
 
 
 def calculate_point_metric(pred_mask, target_mask, num_points=100):
@@ -70,10 +99,9 @@ def validate(model, val_loader, device):
 
     total_intersection = 0.0
     total_union = 0.0
-    total_miou = 0.0
-    total_pointm = 0.0
-    best_ciou = 0.0
-    best_giou = 0.0
+    all_ious = []
+    all_pointms = []
+    best_iou = 0.0
 
     with torch.no_grad():
         for samples, targets in tqdm(val_loader, desc='Validating'):
@@ -87,9 +115,6 @@ def validate(model, val_loader, device):
                 pred_masks = pred_masks.squeeze(1)
             pred_masks = (pred_masks > 0.5).float()
 
-            batch_ious = []
-            batch_pointms = []
-
             for pred, tgt in zip(pred_masks, target):
                 pred_bool = pred.bool()
                 tgt_bool = tgt.bool()
@@ -101,31 +126,20 @@ def validate(model, val_loader, device):
                     total_intersection += intersection
                     total_union += union
 
-                iou = intersection / union if union > 0 else 0.0
-                batch_ious.append(iou)
+                iou = intersection / (union + 1e-6)  # 更稳健
+                all_ious.append(iou)
 
-                # pointM 计算保持不变
-                batch_pointms.append(calculate_point_metric(pred, tgt))
+                all_pointms.append(calculate_point_metric(pred, tgt))
+                best_iou = max(best_iou, iou)
 
-                best_ciou = max(best_ciou, iou)
-                best_giou = max(best_giou, iou)  # 保持原逻辑
-
-            batch_miou = np.mean(batch_ious)
-            batch_pointm = np.mean(batch_pointms)
-
-            total_miou += batch_miou
-            total_pointm += batch_pointm
-
-    num_batches = len(val_loader)
-    avg_miou = total_miou / num_batches
-    avg_pointm = total_pointm / num_batches
+    avg_miou = np.mean(all_ious)
+    avg_pointm = np.mean(all_pointms)
     overall_iou = total_intersection / total_union if total_union > 0 else 0.0
 
     return {
         'mIoU': avg_miou,
-        'IoU': overall_iou,  # 这里是整体IoU（oIoU）
+        'IoU': overall_iou,
         'pointM': avg_pointm,
-        'best_cIoU': best_ciou,
-        'best_gIoU': best_giou
+        'best_IoU': best_iou
     }
 
