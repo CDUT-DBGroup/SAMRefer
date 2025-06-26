@@ -8,7 +8,7 @@ import numpy as np
 from dataset.ReferDataset import ReferDataset
 from get_args import get_args
 from model.builder import refersam
-from evaluation import validate
+from validation.evaluation import validate
 import logging
 import datetime
 import random

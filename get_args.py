@@ -20,7 +20,7 @@ def get_args():
         parser.add_argument(f'--{key}', type=arg_type, default=value)
 
     # Add resume training parameter
-    parser.add_argument('--resume', action='store_true', help='Resume training from checkpoint')
+    parser.add_argument('--resume', help='Resume training from checkpoint')
 
     # Step 4: 解析所有参数（命令行优先）
     args = parser.parse_args()

@@ -258,6 +258,7 @@ def main():
             logger.info(f"best_cIoU: {metrics['best_cIoU']:.4f}")
             logger.info(f"best_gIoU: {metrics['best_gIoU']:.4f}")
             # Save checkpoint for resume
+            os.makedirs(args.output_dir, exist_ok=True)
             checkpoint_path = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
             torch.save({
                 'epoch': epoch + 1,
@@ -272,6 +273,7 @@ def main():
             iou_miou_sum = metrics['IoU'] + metrics['mIoU']
             if iou_miou_sum > best_iou_miou_sum:
                 best_iou_miou_sum = iou_miou_sum
+                os.makedirs(args.output_dir, exist_ok=True)
                 best_path = os.path.join(args.output_dir, 'best_iou_miou_model.pt')
                 if os.path.exists(best_path):
                     os.remove(best_path)
