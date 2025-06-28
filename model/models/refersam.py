@@ -79,7 +79,7 @@ class ReferSAM(nn.Module):
                 m.requires_grad = False
                 names_frozen.append(name)
 
-        print('LEARNABLE params: ', names_learnable)
+        # print('LEARNABLE params: ', names_learnable)
         return params_learnable
     
     def encode_prompt(self, embedding_size, masks=None, text_embeds=None):
