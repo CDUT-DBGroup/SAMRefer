@@ -1,7 +1,7 @@
 import os
 import sys
 import torch
-import torch.optim as optim
+from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
@@ -15,7 +15,7 @@ import datetime
 import random
 import torch.nn as nn
 import torch.distributed as dist
-
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 def set_seed(seed=123456):
     random.seed(seed)
@@ -181,12 +181,26 @@ def main():
 
     if logger:
         logger.info("Initializing optimizer...")
-    optimizer = optim.Adam(
-        model.parameters(),
+    # 如果你自定义了 param 分组逻辑
+    if hasattr(model, 'module') and hasattr(model.module, 'params_to_optimize'):
+        param_groups = model.module.params_to_optimize()
+    else:
+        param_groups = model.parameters()
+
+    optimizer = AdamW(
+        param_groups,
         lr=float(args.lr),
-        weight_decay=float(args.weight_decay)
+        weight_decay=float(args.weight_decay),
+        betas=(0.9, 0.999),
+        eps=1e-8
     )
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+
+    # 推荐：Cosine 学习率调度器（可替换为 ReduceLROnPlateau）
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=args.epochs,   # 或 T_max=len(train_loader) * args.epochs （按step调整）
+        eta_min=1e-6         # 最低学习率
+    )
 
     # resume support
     start_epoch = 0
@@ -312,7 +326,15 @@ def main():
                 best_epoch = best_ckpt.get('epoch', '-')
                 best_metrics = best_ckpt.get('metrics', {})
                 logger.info(f"Current best iou+miou sum: {best_ckpt.get('best_iou_miou_sum', '-'):.4f} (epoch {best_epoch})")
-                logger.info(f"Best model metrics: mIoU={best_metrics.get('mIoU', '-'):.4f}, IoU={best_metrics.get('IoU', '-'):.4f}, pointM={best_metrics.get('pointM', '-'):.4f}")
+                def safe_format(value):
+                    return f"{value:.4f}" if isinstance(value, float) else str(value)
+
+                logger.info(
+                    f"Best model metrics: "
+                    f"mIoU={safe_format(best_metrics.get('mIoU', '-'))}, "
+                    f"IoU={safe_format(best_metrics.get('IoU', '-'))}, "
+                    f"pointM={safe_format(best_metrics.get('pointM', '-'))}"
+                )
     dist.destroy_process_group()
 
 if __name__ == '__main__':
