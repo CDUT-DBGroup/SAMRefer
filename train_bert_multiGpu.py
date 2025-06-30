@@ -120,17 +120,17 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    val_dataset_cocoplus = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco+',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=True,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
+    # val_dataset_cocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='val',
+    #     eval_mode=True,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     train_dataset_cocog = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcocog',
@@ -142,22 +142,22 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    val_dataset_cocog = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcocog',
-        splitBy='umd',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=True,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
+    # val_dataset_cocog = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcocog',
+    #     splitBy='umd',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='val',
+    #     eval_mode=True,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     train_dataset = torch.utils.data.ConcatDataset([
         train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco, val_dataset_cocoplus, val_dataset_cocog
+        val_dataset_coco #, val_dataset_cocoplus, val_dataset_cocog
     ])
 
     if logger:
@@ -181,11 +181,13 @@ def main():
 
     if logger:
         logger.info("Initializing optimizer...")
-    # 如果你自定义了 param 分组逻辑
-    if hasattr(model, 'module') and hasattr(model.module, 'params_to_optimize'):
-        param_groups = model.module.params_to_optimize()
-    else:
-        param_groups = model.parameters()
+
+    param_groups = model.parameters()
+    # # 如果你自定义了 param 分组逻辑
+    # if hasattr(model, 'module') and hasattr(model.module, 'params_to_optimize'):
+    #     param_groups = model.module.params_to_optimize()
+    # else:
+    #     param_groups = model.parameters()
 
     optimizer = AdamW(
         param_groups,
@@ -196,11 +198,12 @@ def main():
     )
 
     # 推荐：Cosine 学习率调度器（可替换为 ReduceLROnPlateau）
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=args.epochs,   # 或 T_max=len(train_loader) * args.epochs （按step调整）
-        eta_min=1e-6         # 最低学习率
-    )
+    # scheduler = CosineAnnealingLR(
+    #     optimizer,
+    #     T_max=args.epochs,   # 或 T_max=len(train_loader) * args.epochs （按step调整）
+    #     eta_min=1e-6         # 最低学习率
+    # )
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     # resume support
     start_epoch = 0
@@ -244,6 +247,10 @@ def main():
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)
             orig_size = samples['orig_size']
+            
+            # 清零梯度
+            optimizer.zero_grad()
+            
             with autocast():
                 loss_dict = model(img, word_ids, word_masks, target)
                 loss = loss_dict['total_loss']
@@ -251,6 +258,18 @@ def main():
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            
+            # 调试：检查梯度是否正常
+            if batch_idx == 0 and epoch == start_epoch:
+                total_grad_norm = 0
+                for name, param in model.named_parameters():
+                    if param.grad is not None:
+                        param_norm = param.grad.data.norm(2)
+                        total_grad_norm += param_norm.item() ** 2
+                total_grad_norm = total_grad_norm ** (1. / 2)
+                if logger:
+                    logger.info(f"Initial gradient norm: {total_grad_norm:.6f}")
+            
             total_loss += loss.item()
             total_mask_loss += loss_dict['loss_mask'].item()
             total_dice_loss += loss_dict['loss_dice'].item()

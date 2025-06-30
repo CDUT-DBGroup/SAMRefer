@@ -164,6 +164,7 @@ class ReferSAM(nn.Module):
                 losses = self.criterion(pred_masks, targets, coarse_masks)
                 return losses
 
+        # 在验证时返回概率值，让验证函数来处理二值化
         if not return_probs:
             pred_masks = pred_masks.sigmoid()
             pred_masks = (pred_masks >= 0.5).long()

@@ -104,16 +104,29 @@ def validate(model, val_loader, device):
     best_iou = 0.0
 
     with torch.no_grad():
-        for samples, targets in tqdm(val_loader, desc='Validating'):
+        for batch_idx, (samples, targets) in enumerate(tqdm(val_loader, desc='Validating')):
             img = samples['img'].to(device, non_blocking=True)
             word_ids = samples['word_ids'].to(device, non_blocking=True)
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)  # [B,H,W]
 
-            pred_masks = model(img, word_ids, word_masks, target)
+            pred_masks = model(img, word_ids, word_masks)
             if pred_masks.ndim == 4:
                 pred_masks = pred_masks.squeeze(1)
-            pred_masks = (pred_masks > 0.5).float()
+            
+            # 打印前几个batch的预测统计信息用于调试
+            if batch_idx < 3:
+                pred_min = pred_masks.min().item()
+                pred_max = pred_masks.max().item()
+                pred_mean = pred_masks.float().mean().item()
+                target_min = target.min().item()
+                target_max = target.max().item()
+                target_mean = target.float().mean().item()
+                print(f"Batch {batch_idx} - Pred stats: min={pred_min:.4f}, max={pred_max:.4f}, mean={pred_mean:.4f}")
+                print(f"Batch {batch_idx} - Target stats: min={target_min:.4f}, max={target_max:.4f}, mean={target_mean:.4f}")
+            
+            # 模型已经输出了二值化结果（0或1），直接转换为float
+            pred_masks = pred_masks.float()
 
             for pred, tgt in zip(pred_masks, target):
                 pred_bool = pred.bool()

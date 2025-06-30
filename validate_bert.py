@@ -131,17 +131,19 @@ def main():
     model.eval()
     with torch.no_grad():
         vis_count = 0
-        for batch_idx, batch, target in enumerate(val_loader):
-            images = batch[batch_idx]['img'].to(device)
-            word_ids = batch[batch_idx]['word_ids'].to(device, non_blocking=True)
-            word_masks = batch[batch_idx]['word_masks'].to(device)
-            texts = batch[batch_idx]['text']
+        for samples, targets in val_loader:
+            if vis_count >= 2:
+                break
+            images = samples['img'].to(device)
+            word_ids = samples['word_ids'].to(device, non_blocking=True)
+            word_masks = samples['word_masks'].to(device)
+            texts = samples['text']
+            gt_masks = targets['mask'].to(device, non_blocking=True).squeeze(1)
 
             preds = model(images, word_ids, word_masks)
             pred_masks = (preds > 0.5).float()
-            visualize_prediction(images, pred_masks)
-            if vis_count==1:
-                break
+            visualize_prediction(images, pred_masks, gt_masks, vis_count)
+            vis_count += 1
 
 if __name__ == '__main__':
     main() 
