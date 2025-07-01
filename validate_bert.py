@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from torchvision import transforms
 from tqdm import tqdm
 import numpy as np
+from dataset.Dataset_referit import ReferitDataset
 from dataset.ReferDataset import ReferDataset
 from model.builder import refersam
 from model.segment_anything.build_sam import sam_model_registry
@@ -14,6 +15,11 @@ from get_args import get_args
 # os.environ["CUDA_VISIBLE_DEVICES"]="1"
 
 import random
+import logging
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+logger = logging.getLogger(__name__)
+
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -66,6 +72,23 @@ def count_parameters(model):
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total_params, trainable_params
 
+def log_sample_info(dataset, name, num_samples=2):
+    logger.info(f"===== Inspecting {name} dataset, total {len(dataset)} samples =====")
+    for i in range(min(num_samples, len(dataset))):
+        sample, target = dataset[i]
+        logger.info(f"[{name}][{i}] img shape: {getattr(sample['img'], 'shape', type(sample['img']))}")
+        logger.info(f"[{name}][{i}] orig_size: {sample.get('orig_size', None)}")
+        logger.info(f"[{name}][{i}] text: {sample.get('text', None)}")
+        logger.info(f"[{name}][{i}] word_ids: {sample.get('word_ids', None)}")
+        logger.info(f"[{name}][{i}] word_masks: {sample.get('word_masks', None)}")
+        logger.info(f"[{name}][{i}] mask shape: {getattr(target['mask'], 'shape', type(target['mask']))}")
+        logger.info(f"[{name}][{i}] img_path: {target.get('img_path', None)}")
+        logger.info(f"[{name}][{i}] sentences: {target.get('sentences', None)}")
+        logger.info(f"[{name}][{i}] boxes: {target.get('boxes', None)}")
+        logger.info(f"[{name}][{i}] orig_size: {target.get('orig_size', None)}")
+        logger.info(f"[{name}][{i}] img_full_path: {target.get('img_full_path', None)}")
+        logger.info("-")
+
 def main():
     # Fixed arguments for BERT configuration
     args = get_args()
@@ -74,27 +97,25 @@ def main():
 
     # Set device
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
+    logger.info(f"Using device: {device}")
 
     # Initialize models and criterion
-    print("Initializing models...")
+    logger.info("Initializing models...")
     model = refersam(args=args, pretrained=True)
     # Load trained model weights
-    print(f"Loading model weights from {args.pre_train_path}")
+    logger.info(f"Loading model weights from {args.pre_train_path}")
     model.eval()  # Set model to evaluation mode
 
     # Print model parameters
     total_params, trainable_params = count_parameters(model)
-    print(f"\nModel Parameters:")
-    print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
-    print(f"Non-trainable parameters: {total_params - trainable_params:,}")
+    logger.info(f"\nModel Parameters:")
+    logger.info(f"Total parameters: {total_params:,}")
+    logger.info(f"Trainable parameters: {trainable_params:,}")
+    logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
 
-    # Define image transforms
-
-    # Create validation dataset
-    print("Creating validation dataset...")
-    val_dataset = ReferDataset(
+    # Create validation datasets
+    logger.info("Creating validation datasets...")
+    val_dataset_coco = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcoco',
         splitBy='unc',
@@ -105,45 +126,57 @@ def main():
         size=320,
         precision=args.precision
     )
-
-    # Create validation data loader
-    print("Creating validation data loader...")
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=True
+    val_dataset_cocoplus = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco+',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='val',
+        eval_mode=True,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
     )
+    val_dataset_cocog = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcocog',
+        splitBy='umd',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='val',
+        eval_mode=True,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
+    val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
 
-    # Run validation
-    print("\nStarting validation...")
-    metrics = validate(model, val_loader, device)
-    
-    # Print validation results
-    print("\nValidation Results:")
-    print(f"mIoU: {metrics['mIoU']:.4f}")
-    print(f"IoU: {metrics['IoU']:.4f}")
-    print(f"pointM: {metrics['pointM']:.4f}")
-    print(f"best_IoU: {metrics['best_IoU']:.4f}")
-    # 可视化前两张预测结果
-    print("\nGenerating visualization for first 2 samples...")
-    model.eval()
-    with torch.no_grad():
-        vis_count = 0
-        for samples, targets in val_loader:
-            if vis_count >= 2:
-                break
-            images = samples['img'].to(device)
-            word_ids = samples['word_ids'].to(device, non_blocking=True)
-            word_masks = samples['word_masks'].to(device)
-            texts = samples['text']
-            gt_masks = targets['mask'].to(device, non_blocking=True).squeeze(1)
+    # 打印每个数据集前2个样本内容
+    log_sample_info(val_dataset_coco, 'refcoco')
+    log_sample_info(val_dataset_cocoplus, 'refcoco+')
+    log_sample_info(val_dataset_cocog, 'refcocog')
+    log_sample_info(val_referit, 'referit')
 
-            preds = model(images, word_ids, word_masks)
-            pred_masks = (preds > 0.5).float()
-            visualize_prediction(images, pred_masks, gt_masks, vis_count)
-            vis_count += 1
+    # 分别验证四个数据集
+    for dataset, name in [
+        (val_dataset_coco, 'refcoco'),
+        (val_dataset_cocoplus, 'refcoco+'),
+        (val_dataset_cocog, 'refcocog'),
+        (val_referit, 'referit')
+    ]:
+        logger.info(f"\nStarting validation for {name}...")
+        val_loader = DataLoader(
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=True
+        )
+        metrics = validate(model, val_loader, device)
+        logger.info(f"\nValidation Results for {name}:")
+        logger.info(f"mIoU: {metrics['mIoU']:.4f}")
+        logger.info(f"IoU: {metrics['IoU']:.4f}")
+        logger.info(f"pointM: {metrics['pointM']:.4f}")
+        logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
 
 if __name__ == '__main__':
     main() 
