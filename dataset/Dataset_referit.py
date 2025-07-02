@@ -76,11 +76,12 @@ class ReferitDataset(torch.utils.data.Dataset):
         item = self.all_refs[index]
         img_path = os.path.join(self.img_folder, str(item['image_id']) + '.jpg')
         img = Image.open(img_path).convert("RGB")
-        orig_size = np.array([img.height, img.width])
-        img_full_path = os.path.abspath(img_path)
+        h, w = img.height, img.width
+        orig_size = np.array([h, w])  # np.array
+        img_full_path = str(os.path.abspath(img_path))  # str
         img = self.image_transform(img)
 
-        query = item['query']
+        query = str(item['query'])
         if self.clip:
             tokens = self.tokenizer(
                 query,
@@ -89,8 +90,8 @@ class ReferitDataset(torch.utils.data.Dataset):
                 truncation=True,
                 return_tensors='pt'
             )
-            word_id = tokens['input_ids'].squeeze(0)
-            word_mask = tokens['attention_mask'].squeeze(0)
+            word_id = tokens['input_ids'].squeeze(0).to(dtype=torch.long)
+            word_mask = tokens['attention_mask'].squeeze(0).to(dtype=torch.long)
         else:
             tokens = self.tokenizer(
                 query,
@@ -99,32 +100,35 @@ class ReferitDataset(torch.utils.data.Dataset):
                 truncation=True,
                 return_tensors='pt'
             )
-            word_id = tokens['input_ids'].squeeze(0)
-            word_mask = tokens['attention_mask'].squeeze(0)
+            word_id = tokens['input_ids'].squeeze(0).to(dtype=torch.long)
+            word_mask = tokens['attention_mask'].squeeze(0).to(dtype=torch.long)
 
-        bbox = item["bbox"]
-        bbox = np.array(bbox)
+        bbox = np.array(item["bbox"], dtype=int)
+        if bbox.shape[0] == 1:
+            bbox = bbox[0]
+        # 保证bbox为[x1, y1, x2, y2]格式
+        bbox[2], bbox[3] = bbox[0] + bbox[2], bbox[1] + bbox[3]
         mask = cocomask.decode(item["segmentation"])
         mask = np.sum(mask, axis=2)
         mask = mask.astype(np.uint8)
         mask = Image.fromarray(mask)
         mask = self.mask_transform(mask)
-        mask = torch.tensor(np.asarray(mask), dtype=torch.float32)
+        mask = mask.to(dtype=torch.float32)
 
         samples = {
-            "img": img,
-            "orig_size": orig_size,
-            "text": query,
-            "word_ids": word_id,
-            "word_masks": word_mask,
+            "img": img,  # tensor
+            "orig_size": orig_size,  # np.array
+            "text": query,  # str
+            "word_ids": word_id,  # torch.LongTensor
+            "word_masks": word_mask,  # torch.LongTensor
         }
         targets = {
-            "mask": mask,
-            "img_path": item["image_id"],
-            "sentences": query,
-            "boxes": bbox,
-            "orig_size": orig_size,
-            "img_full_path": img_full_path,
+            "mask": mask,  # torch.FloatTensor
+            "img_path": int(item["image_id"]),  # int
+            "sentences": query,  # str
+            "boxes": bbox,  # np.array([x1, y1, x2, y2])
+            "orig_size": orig_size,  # np.array
+            "img_full_path": img_full_path,  # str
         }
         return samples, targets
 
@@ -152,9 +156,9 @@ if __name__ == "__main__":
         j = 0 
         for sen in samples.keys():
             item = samples[sen]
-            sentences, bbox = item['sentences'], item['bbox']
+            sentences, bbox = item['sentences'], item['boxes']
             bbox = bbox[0]
-            word_id = item['word_id'].cuda() 
+            word_id = item['word_ids'].cuda() 
             target = item['mask'].cuda() 
             o_H,o_W = target.shape[-2:]
             batch_size = word_id.shape[0]

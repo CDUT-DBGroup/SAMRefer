@@ -89,7 +89,7 @@ def log_sample_info(dataset, name, num_samples=2):
         logger.info(f"[{name}][{i}] img_full_path: {target.get('img_full_path', None)}")
         logger.info("-")
 
-def main():
+def evaluate_four_datasets():
     # Fixed arguments for BERT configuration
     args = get_args()
     # Create output directory
@@ -179,4 +179,4 @@ def main():
         logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
 
 if __name__ == '__main__':
-    main() 
+    evaluate_four_datasets() 

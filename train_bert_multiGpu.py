@@ -10,6 +10,7 @@ from dataset.Dataset_referit import ReferitDataset
 from dataset.ReferDataset import ReferDataset
 from get_args import get_args
 from model.builder import refersam
+from validate_bert import evaluate_four_datasets
 from validation.evaluation import validate
 import logging
 import datetime
@@ -121,17 +122,17 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    # val_dataset_cocoplus = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcoco+',
-    #     splitBy='unc',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='val',
-    #     eval_mode=True,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
+    val_dataset_cocoplus = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco+',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='val',
+        eval_mode=True,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
     train_dataset_cocog = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcocog',
@@ -162,7 +163,7 @@ def main():
         train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog, train_referit
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco #, val_dataset_cocoplus, val_dataset_cocog, val_referit
+        val_dataset_coco , val_dataset_cocoplus, val_referit #val_dataset_cocog,
     ])
 
     if logger:
@@ -173,26 +174,26 @@ def main():
         train_dataset,
         batch_size=args.batch_size,
         sampler=train_sampler,
-        num_workers=8,
+        num_workers=16,
         pin_memory=True
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         sampler=val_sampler,
-        num_workers=4,
+        num_workers=16,
         pin_memory=True
     )
 
     if logger:
         logger.info("Initializing optimizer...")
 
-    param_groups = model.parameters()
-    # # 如果你自定义了 param 分组逻辑
-    # if hasattr(model, 'module') and hasattr(model.module, 'params_to_optimize'):
-    #     param_groups = model.module.params_to_optimize()
-    # else:
-    #     param_groups = model.parameters()
+    # param_groups = model.parameters()
+    # 如果你自定义了 param 分组逻辑
+    if hasattr(model, 'module') and hasattr(model.module, 'params_to_optimize'):
+        param_groups = model.module.params_to_optimize()
+    else:
+        param_groups = model.parameters()
 
     optimizer = AdamW(
         param_groups,
@@ -312,14 +313,6 @@ def main():
                 best_path = os.path.join(args.output_dir, 'best_iou_miou_model.pt')
                 if os.path.exists(best_path):
                     os.remove(best_path)
-                # torch.save({
-                #     'epoch': epoch + 1,
-                #     'model_state_dict': model.module.state_dict(),
-                #     'optimizer_state_dict': optimizer.state_dict(),
-                #     'scheduler_state_dict': scheduler.state_dict(),
-                #     'metrics': metrics,
-                #     'best_iou_miou_sum': best_iou_miou_sum
-                # }, best_path)
                 torch.save({
                     'epoch': epoch + 1,
                     'model_state_dict': model.module.state_dict(),
@@ -365,3 +358,5 @@ if __name__ == '__main__':
     import torch.multiprocessing as mp
     mp.set_start_method('fork', force=True)
     main() 
+    # 在训练结束后评估四个数据集
+    evaluate_four_datasets()
