@@ -160,10 +160,10 @@ def main():
 
 
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog, train_referit
+        train_dataset_coco, train_referit#, train_dataset_cocoplus, train_dataset_cocog#, train_referit
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco , val_dataset_cocoplus, val_referit #val_dataset_cocog,
+        val_dataset_coco, val_referit# val_dataset_cocoplus#, val_referit #val_dataset_cocog,
     ])
 
     if logger:
@@ -204,12 +204,12 @@ def main():
     )
 
     # 推荐：Cosine 学习率调度器（可替换为 ReduceLROnPlateau）
-    # scheduler = CosineAnnealingLR(
-    #     optimizer,
-    #     T_max=args.epochs,   # 或 T_max=len(train_loader) * args.epochs （按step调整）
-    #     eta_min=1e-6         # 最低学习率
-    # )
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=args.epochs,   # 或 T_max=len(train_loader) * args.epochs （按step调整）
+        eta_min=1e-6         # 最低学习率
+    )
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     # resume support
     start_epoch = 0

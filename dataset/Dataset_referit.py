@@ -107,7 +107,7 @@ class ReferitDataset(torch.utils.data.Dataset):
         if bbox.shape[0] == 1:
             bbox = bbox[0]
         # 保证bbox为[x1, y1, x2, y2]格式
-        bbox[2], bbox[3] = bbox[0] + bbox[2], bbox[1] + bbox[3]
+            bbox[2], bbox[3] = bbox[0] + bbox[2], bbox[1] + bbox[3]
         mask = cocomask.decode(item["segmentation"])
         mask = np.sum(mask, axis=2)
         mask = mask.astype(np.uint8)
