@@ -17,7 +17,7 @@ import datetime
 import random
 import torch.nn as nn
 import torch.distributed as dist
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
 
 def set_seed(seed=123456):
     random.seed(seed)
@@ -61,7 +61,7 @@ def main():
 
     from torch.cuda.amp import autocast, GradScaler
 
-    scaler = GradScaler()
+    scaler = GradScaler(init_scale=1024.0, growth_interval=2000) # 初始化scale为1024，每2000步增长一次
 
 
     args = get_args()
@@ -111,39 +111,39 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    train_dataset_cocoplus = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco+',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    val_dataset_cocoplus = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco+',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=True,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    train_dataset_cocog = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcocog',
-        splitBy='umd',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
+    # train_dataset_cocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # val_dataset_cocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='val',
+    #     eval_mode=True,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_cocog = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcocog',
+    #     splitBy='umd',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     # val_dataset_cocog = ReferDataset(
     #     refer_data_root=args.data_root,
     #     dataset='refcocog',
@@ -155,15 +155,15 @@ def main():
     #     size=getattr(args, 'img_size', 320),
     #     precision=args.precision
     # )
-    train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
+    # train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
 
 
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_coco, train_referit#, train_dataset_cocoplus, train_dataset_cocog#, train_referit
+        train_dataset_coco#, train_dataset_cocoplus, train_dataset_cocog, train_referit
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco, val_referit# val_dataset_cocoplus#, val_referit #val_dataset_cocog,
+        val_dataset_coco, val_referit# val_dataset_cocoplus#, val_referit,
     ])
 
     if logger:
@@ -203,13 +203,18 @@ def main():
         eps=1e-8
     )
 
-    # 推荐：Cosine 学习率调度器（可替换为 ReduceLROnPlateau）
-    scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=args.epochs,   # 或 T_max=len(train_loader) * args.epochs （按step调整）
-        eta_min=1e-6         # 最低学习率
-    )
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    # 推荐：Warmup + Cosine 学习率调度器
+    warmup_epochs = 2
+    total_steps = len(train_loader) * args.epochs
+    warmup_steps = len(train_loader) * warmup_epochs
+    
+    def lr_lambda(current_step):
+        if current_step < warmup_steps:
+            return float(current_step + 1) / float(warmup_steps)
+        return 1.0
+    
+    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=total_steps-warmup_steps, eta_min=1e-6)
+    scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
 
     # resume support
     start_epoch = 0
@@ -237,6 +242,7 @@ def main():
 
     if logger:
         logger.info("Starting training...")
+    global_step = 0
     for epoch in range(start_epoch, args.epochs):
         model.train()
         train_sampler.set_epoch(epoch)
@@ -257,14 +263,23 @@ def main():
             # 清零梯度
             optimizer.zero_grad()
             
-            with autocast():
+            # with autocast(enabled=False):
+            with autocast(): # 采用自动混合精度时会出现初始化梯度为Nan
                 loss_dict = model(img, word_ids, word_masks, target)
                 loss = loss_dict['total_loss']
+                
+                # 检查损失值是否为NaN或Inf
+                if torch.isnan(loss) or torch.isinf(loss):
+                    if logger:
+                        logger.error(f"NaN/Inf loss detected: {loss.item()}")
+                        logger.error(f"Loss dict: {loss_dict}")
+                    continue
             # AMP backward + optimizer step
             scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
-            
             # 调试：检查梯度是否正常
             if batch_idx == 0 and epoch == start_epoch:
                 total_grad_norm = 0
@@ -294,7 +309,13 @@ def main():
                     logger.info(f"Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
                                 f"Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - "
                                 f"Dice Loss: {current_dice_loss:.4f}")
-        scheduler.step()
+
+            # 更新学习率调度器
+            if global_step < warmup_steps:
+                scheduler.step()
+            else:
+                cosine_scheduler.step()
+            global_step += 1
 
         # Validation and checkpointing only on rank 0
         if rank == 0:

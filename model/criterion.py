@@ -63,6 +63,15 @@ class SegMaskLoss(nn.Module):
         '''
         loss_dict = dict()
         target = targets.to(pred.dtype)
+        
+        if torch.isnan(pred).any() or torch.isinf(pred).any():
+            print("Warning: NaN/Inf detected in predictions")
+            pred = torch.nan_to_num(pred, nan=0.0, posinf=1.0, neginf=0.0)
+        
+        if torch.isnan(target).any() or torch.isinf(target).any():
+            print("Warning: NaN/Inf detected in targets")
+            target = torch.nan_to_num(target, nan=0.0, posinf=1.0, neginf=0.0)
+        
         main_losses = self.loss_masks(pred, target)
         loss_dict.update(main_losses)
 
