@@ -163,7 +163,7 @@ def main():
         train_dataset_coco#, train_dataset_cocoplus, train_dataset_cocog, train_referit
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco, val_referit# val_dataset_cocoplus#, val_referit,
+        val_dataset_coco#, val_referit# val_dataset_cocoplus#, val_referit,
     ])
 
     if logger:
@@ -213,9 +213,9 @@ def main():
             return float(current_step + 1) / float(warmup_steps)
         return 1.0
     
-    # cosine_scheduler = CosineAnnealingLR(optimizer, T_max=total_steps-warmup_steps, eta_min=1e-6)
-    # scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
+    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=total_steps-warmup_steps, eta_min=1e-6)
+    scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     # resume support
     start_epoch = 0
@@ -261,6 +261,7 @@ def main():
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)
             orig_size = samples['orig_size']
             
+
             # 清零梯度
             optimizer.zero_grad()
             
@@ -277,8 +278,8 @@ def main():
                     continue
             # AMP backward + optimizer step
             scaler.scale(loss).backward()
-            # scaler.unscale_(optimizer)
-            # nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.unscale_(optimizer)
+            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
             # 调试：检查梯度是否正常
@@ -315,8 +316,8 @@ def main():
             if global_step < warmup_steps:
                 scheduler.step()
             else:
-                scheduler.step()
-                # cosine_scheduler.step()
+                # scheduler.step()
+                cosine_scheduler.step()
             global_step += 1
 
         # Validation and checkpointing only on rank 0
