@@ -179,4 +179,4 @@ def evaluate_four_datasets():
         logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
 
 if __name__ == '__main__':
-    evaluate_four_datasets() 
+    evaluate_four_datasets()
