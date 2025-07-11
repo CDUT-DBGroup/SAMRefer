@@ -89,6 +89,151 @@ def log_sample_info(dataset, name, num_samples=2):
         logger.info(f"[{name}][{i}] img_full_path: {target.get('img_full_path', None)}")
         logger.info("-")
 
+def create_datasets(args):
+    """
+    创建并返回需要验证的数据集和其名称组成的列表
+    """
+    dataset_configs = [
+        {
+            'name': 'refcoco',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcoco',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'val',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'refcoco',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcoco',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testA',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+         {
+            'name': 'refcoco',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcoco',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testB',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'refcoco+',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcoco+',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'val',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'refcoco+',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcoco+',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testA',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'refcoco+',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcoco+',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testB',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'refcocog',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcocog',
+                'splitBy': 'umd',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'val',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'refcocog',
+            'class': ReferDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'refcocog',
+                'splitBy': 'umd',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'test',
+                'eval_mode': True,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'referit',
+            'class': ReferitDataset,
+            'kwargs': {
+                'root': args.data_referit_root,
+                'split': 'val',
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'size': getattr(args, 'img_size', 320)
+            }
+        }
+    ]
+
+    datasets = []
+    for cfg in dataset_configs:
+        dataset = cfg['class'](**cfg['kwargs'])
+        datasets.append((dataset, cfg['name']))
+    return datasets
+
+
+
 def evaluate_four_datasets():
     # Fixed arguments for BERT configuration
     args = get_args()
@@ -115,54 +260,15 @@ def evaluate_four_datasets():
 
     # Create validation datasets
     logger.info("Creating validation datasets...")
-    val_dataset_coco = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=30,
-        split='val',
-        eval_mode=True,
-        size=320,
-        precision=args.precision
-    )
-    val_dataset_cocoplus = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco+',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=True,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    val_dataset_cocog = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcocog',
-        splitBy='umd',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=True,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
+    # 创建所有数据集
+    datasets = create_datasets(args)
 
-    # 打印每个数据集前2个样本内容
-    log_sample_info(val_dataset_coco, 'refcoco')
-    log_sample_info(val_dataset_cocoplus, 'refcoco+')
-    log_sample_info(val_dataset_cocog, 'refcocog')
-    log_sample_info(val_referit, 'referit')
+    # 打印每个数据集前2个样本
+    for dataset, name in datasets:
+        log_sample_info(dataset, name)
 
-    # 分别验证四个数据集
-    for dataset, name in [
-        (val_dataset_coco, 'refcoco'),
-        (val_dataset_cocoplus, 'refcoco+'),
-        (val_dataset_cocog, 'refcocog'),
-        (val_referit, 'referit')
-    ]:
+    # 验证每个数据集
+    for dataset, name in datasets:
         logger.info(f"\nStarting validation for {name}...")
         val_loader = DataLoader(
             dataset,
@@ -174,7 +280,9 @@ def evaluate_four_datasets():
         metrics = validate(model, val_loader, device)
         logger.info(f"\nValidation Results for {name}:")
         logger.info(f"mIoU: {metrics['mIoU']:.4f}")
-        logger.info(f"IoU: {metrics['IoU']:.4f}")
+        logger.info(f"oIoU: {metrics['oIoU']:.4f}")
+        logger.info(f"gIoU: {metrics['gIoU']:.4f}")
+        logger.info(f"Acc: {metrics['Acc']:.4f}")
         logger.info(f"pointM: {metrics['pointM']:.4f}")
         logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
 
