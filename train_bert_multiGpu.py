@@ -155,12 +155,12 @@ def main():
     #     size=getattr(args, 'img_size', 320),
     #     precision=args.precision
     # )
-    # train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
+    train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     # val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
 
 
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog#, train_referit
+        train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog, train_referit
     ])
     val_dataset = torch.utils.data.ConcatDataset([
         val_dataset_coco#, val_referit# val_dataset_cocoplus#, val_referit,

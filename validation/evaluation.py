@@ -151,6 +151,7 @@ def validate(model, val_loader, device):
 
     return {
         'mIoU': avg_miou,
+        'oIoU': overall_iou,
         'IoU': overall_iou,
         'pointM': avg_pointm,
         'best_IoU': best_iou
