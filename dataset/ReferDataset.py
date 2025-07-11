@@ -11,6 +11,8 @@ import numpy as np
 from transformers import BertTokenizer, BertModel
 from transformers import CLIPTextModel, CLIPTokenizer
 from torchvision import transforms
+
+from get_args import get_args
 # sentence = 'new_sentenc'
 sentence = 'sentences'
 
@@ -205,3 +207,15 @@ class ReferDataset(data.Dataset):
 
         return samples, targets
 
+
+if __name__ == "__main__":
+    args = get_args()
+    dataset = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='ref-zom',
+        splitBy='final',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=30,
+        split='train',
+    )
+    print(dataset.__getitem__(0))
