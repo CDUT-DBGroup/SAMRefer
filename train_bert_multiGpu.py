@@ -1,7 +1,6 @@
 import os
 import sys
 import torch
-from torch.optim import AdamW
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from tqdm import tqdm
@@ -17,7 +16,13 @@ import datetime
 import random
 import torch.nn as nn
 import torch.distributed as dist
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+import deepspeed
+from deepspeed.ops.adam import DeepSpeedCPUAdam
+
+# 内存优化设置
+torch.backends.cudnn.benchmark = True
+torch.backends.cudnn.deterministic = False
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 
 def set_seed(seed=123456):
     random.seed(seed)
@@ -28,7 +33,6 @@ def set_seed(seed=123456):
     torch.backends.cudnn.benchmark = False
 
 set_seed()
-# Configure logging
 
 def setup_logger(output_dir, rank=0):
     if rank != 0:
@@ -49,26 +53,20 @@ def count_parameters(model):
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total_params, trainable_params
 
-
 def main():
-    # DDP: initialize process group
-    dist.init_process_group(backend="nccl")
+    # 初始化 DeepSpeed
+    ds_config = deepspeed.init_distributed()
     local_rank = int(os.environ["LOCAL_RANK"])
     world_size = dist.get_world_size()
     rank = dist.get_rank()
     torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{local_rank}")
 
-    from torch.cuda.amp import autocast, GradScaler
-
-    scaler = GradScaler(init_scale=1024.0, growth_interval=2000) # 初始化scale为1024，每2000步增长一次
-
-
     args = get_args()
     os.makedirs(args.output_dir, exist_ok=True)
     logger = setup_logger(args.output_dir, rank)
     if logger:
-        logger.info(f"Starting DDP training: rank {rank}, world_size {world_size}")
+        logger.info(f"Starting DeepSpeed training: rank {rank}, world_size {world_size}")
         logger.info(f"Batch size: {args.batch_size}")
         logger.info(f"Epochs: {args.epochs}")
         logger.info(f"Learning rate: {args.lr}")
@@ -79,7 +77,11 @@ def main():
         logger.info("Creating ReferSAM model...")
     model = refersam(args=args)
     model = model.to(device)
-    model = nn.parallel.DistributedDataParallel(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+    # 确保模型参数使用正确的数据类型
+    for param in model.parameters():
+        if param.dtype != torch.float32:
+            param.data = param.data.float()
+    
     if logger:
         total_params, trainable_params = count_parameters(model)
         logger.info(f"\nModel Parameters:")
@@ -89,87 +91,25 @@ def main():
 
     if logger:
         logger.info("Creating datasets...")
-    # train_dataset_coco = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcoco',
-    #     splitBy='unc',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='train',
-    #     eval_mode=False,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
-    # val_dataset_coco = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcoco',
-    #     splitBy='unc',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='val',
-    #     eval_mode=True,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
-    # train_dataset_cocoplus = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcoco+',
-    #     splitBy='unc',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='train',
-    #     eval_mode=False,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
-    # val_dataset_cocoplus = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcoco+',
-    #     splitBy='unc',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='val',
-    #     eval_mode=True,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
-    # train_dataset_cocog = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcocog',
-    #     splitBy='umd',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='train',
-    #     eval_mode=False,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
-    # val_dataset_cocog = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcocog',
-    #     splitBy='umd',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='val',
-    #     eval_mode=True,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
+    train_dataset_coco = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='train',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
     train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     train_dataset = torch.utils.data.ConcatDataset([
-        train_referit
+        train_referit, train_dataset_coco
     ])
     val_dataset = torch.utils.data.ConcatDataset([
         val_referit,
     ])
-
-    # train_dataset = torch.utils.data.ConcatDataset([
-    #     train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog, train_referit
-    # ])
-    # val_dataset = torch.utils.data.ConcatDataset([
-    #     val_dataset_coco#, val_referit# val_dataset_cocoplus#, val_referit,
-    # ])
 
     if logger:
         logger.info("Creating data loaders...")
@@ -179,65 +119,44 @@ def main():
         train_dataset,
         batch_size=args.batch_size,
         sampler=train_sampler,
-        num_workers=16,
-        pin_memory=True
+        num_workers=0,  # 如果内存不足，设置为0
+        pin_memory=False  # 如果内存不足，设置为False
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         sampler=val_sampler,
-        num_workers=16,
-        pin_memory=True
+        num_workers=0,  # 如果内存不足，设置为0
+        pin_memory=False  # 如果内存不足，设置为False
     )
 
+    # 初始化 DeepSpeed 引擎
     if logger:
-        logger.info("Initializing optimizer...")
-
-    # param_groups = model.parameters()
-    # 如果你自定义了 param 分组逻辑
-    if hasattr(model, 'module') and hasattr(model.module, 'params_to_optimize'):
-        param_groups = model.module.params_to_optimize()
+        logger.info("Initializing DeepSpeed engine...")
+    
+    # 创建参数组
+    if hasattr(model, 'params_to_optimize'):
+        param_groups = model.params_to_optimize()
     else:
         param_groups = model.parameters()
 
-    optimizer = AdamW(
-        param_groups,
-        lr=float(args.lr),
-        weight_decay=float(args.weight_decay),
-        betas=(0.9, 0.999),
-        eps=1e-8
+    # 初始化 DeepSpeed 引擎
+    model_engine, optimizer, _, _ = deepspeed.initialize(
+        model=model,
+        model_parameters=param_groups,
+        config=args.deepspeed_config if hasattr(args, 'deepspeed_config') else 'ds_config.json'
     )
-
-    # 推荐：Warmup + Cosine 学习率调度器
-    warmup_epochs = 2
-    total_steps = len(train_loader) * args.epochs
-    warmup_steps = len(train_loader) * warmup_epochs
-    
-    def lr_lambda(current_step):
-        if current_step < warmup_steps:
-            return float(current_step + 1) / float(warmup_steps)
-        return 1.0
-    
-    cosine_scheduler = CosineAnnealingLR(optimizer, T_max=total_steps-warmup_steps, eta_min=1e-6)
-    scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
 
     # resume support
     start_epoch = 0
     best_iou_miou_sum = 0
     if rank == 0 and hasattr(args, 'resume') and args.resume and os.path.isfile(args.resume):
         logger.info(f"Resuming from checkpoint: {args.resume}")
-        checkpoint = torch.load(args.resume, map_location=device)
-        model.module.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if 'scheduler_state_dict' in checkpoint:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        if 'torch_amp_scaler' in checkpoint:
-            scaler.load_state_dict(checkpoint['torch_amp_scaler'])
-
-        start_epoch = checkpoint.get('epoch', 0)
-        best_iou_miou_sum = checkpoint.get('best_iou_miou_sum', 0)
+        _, client_state = model_engine.load_checkpoint(args.resume)
+        start_epoch = client_state.get('epoch', 0)
+        best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
         logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
+    
     # broadcast resume info to all ranks
     start_epoch_tensor = torch.tensor([start_epoch], dtype=torch.int, device=device)
     best_iou_miou_sum_tensor = torch.tensor([best_iou_miou_sum], dtype=torch.float, device=device)
@@ -250,7 +169,7 @@ def main():
         logger.info("Starting training...")
     global_step = 0
     for epoch in range(start_epoch, args.epochs):
-        model.train()
+        model_engine.train()
         train_sampler.set_epoch(epoch)
         total_loss = 0
         total_mask_loss = 0
@@ -260,43 +179,57 @@ def main():
         else:
             pbar = train_loader
         for batch_idx, (samples, targets) in enumerate(pbar):
-            img = samples['img'].to(device, non_blocking=True)
+            img = samples['img'].to(device, non_blocking=True).half()
             word_ids = samples['word_ids'].to(device, non_blocking=True)
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)
             orig_size = samples['orig_size']
             
+            if target.sum() < 10:  # 面积太小的 mask
+                if logger:
+                    logger.warning("Skipping sample with empty/too small mask")
+                continue
 
-            # 清零梯度
-            optimizer.zero_grad()
-            
-            with autocast(enabled=False):
-            # with autocast(): # 采用自动混合精度时会出现初始化梯度为Nan
-                loss_dict = model(img, word_ids, word_masks, target)
-                loss = loss_dict['total_loss']
+            # DeepSpeed 前向传播和反向传播
+            loss_dict = model_engine(img, word_ids, word_masks, target)
+            loss = loss_dict['total_loss']
                 
-                # 检查损失值是否为NaN或Inf
-                if torch.isnan(loss) or torch.isinf(loss):
+            # 检查损失值是否为NaN或Inf
+            if torch.isnan(loss) or torch.isinf(loss):
+                if logger:
+                    logger.error(f"NaN/Inf loss detected: {loss.item()}")
+                    logger.error(f"Loss dict: {loss_dict}")
+                    logger.error(f"Image stats: min={img.min().item():.6f}, max={img.max().item():.6f}, mean={img.mean().item():.6f}")
+                    logger.error(f"Target stats: min={target.min().item():.6f}, max={target.max().item():.6f}, mean={target.mean().item():.6f}")
+                continue
+                
+            # 检查各个损失分量
+            for loss_name, loss_value in loss_dict.items():
+                if torch.isnan(loss_value) or torch.isinf(loss_value):
                     if logger:
-                        logger.error(f"NaN/Inf loss detected: {loss.item()}")
-                        logger.error(f"Loss dict: {loss_dict}")
+                        logger.error(f"NaN/Inf detected in {loss_name}: {loss_value.item()}")
                     continue
-            # AMP backward + optimizer step
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-            nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scaler.step(optimizer)
-            scaler.update()
+            
+            # DeepSpeed 反向传播和优化器步骤
+            model_engine.backward(loss)
+            model_engine.step()
+            
             # 调试：检查梯度是否正常
             if batch_idx == 0 and epoch == start_epoch:
                 total_grad_norm = 0
-                for name, param in model.named_parameters():
+                grad_info = []
+                for name, param in model_engine.module.named_parameters():
                     if param.grad is not None:
                         param_norm = param.grad.data.norm(2)
                         total_grad_norm += param_norm.item() ** 2
+                        grad_dtype = param.grad.dtype
+                        grad_info.append(f"{name}: norm={param_norm.item():.6f}, dtype={grad_dtype}")
                 total_grad_norm = total_grad_norm ** (1. / 2)
                 if logger:
                     logger.info(f"Initial gradient norm: {total_grad_norm:.6f}")
+                    logger.info("Gradient info (first 5 layers):")
+                    for info in grad_info[:5]:
+                        logger.info(f"  {info}")
             
             total_loss += loss.item()
             total_mask_loss += loss_dict['loss_mask'].item()
@@ -310,25 +243,19 @@ def main():
                     'mask_loss': current_mask_loss,
                     'dice_loss': current_dice_loss
                 })
-                # logger.info(f"Sample target stats: min={target.min()}, max={target.max()}, mean={target.float().mean()}")
-                # logger.info(f"Sample img stats: min={img.min()}, max={img.max()}, mean={img.float().mean()}")
                 if (batch_idx + 1) % 10 == 0:
                     logger.info(f"Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
                                 f"Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - "
                                 f"Dice Loss: {current_dice_loss:.4f}")
 
-            # 更新学习率调度器
-            if global_step < warmup_steps:
-                scheduler.step()
-            else:
-                # scheduler.step()
-                cosine_scheduler.step()
-            global_step += 1
-
         # Validation and checkpointing only on rank 0
         if rank == 0:
             logger.info(f"\nValidating epoch {epoch+1}...")
-            metrics = validate(model, val_loader, device)
+            # 临时切换到评估模式
+            model_engine.eval()
+            metrics = validate(model_engine.module, val_loader, device)
+            model_engine.train()
+            
             logger.info(f"Validation metrics for epoch {epoch+1}:")
             logger.info(f"mIoU: {metrics['mIoU']:.4f}")
             logger.info(f"oIoU: {metrics['oIoU']:.4f}")
@@ -336,58 +263,43 @@ def main():
             logger.info(f"Acc: {metrics['Acc']:.4f}")
             logger.info(f"pointM: {metrics['pointM']:.4f}")
             logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
+            
             # Save best iou+miou model
             iou_miou_sum = metrics['oIoU'] + metrics['mIoU']
             if iou_miou_sum > best_iou_miou_sum:
                 best_iou_miou_sum = iou_miou_sum
                 os.makedirs(args.output_dir, exist_ok=True)
-                best_path = os.path.join(args.output_dir, 'best_iou_miou_model.pt')
-                if os.path.exists(best_path):
-                    os.remove(best_path)
-                torch.save({
+                best_path = os.path.join(args.output_dir, 'best_iou_miou_model')
+                
+                # 使用 DeepSpeed 保存检查点
+                client_state = {
                     'epoch': epoch + 1,
-                    'model_state_dict': model.module.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'scheduler_state_dict': scheduler.state_dict(),
-                    'torch_amp_scaler': scaler.state_dict(),
-                    'best_iou_miou_sum': best_iou_miou_sum
-                }, best_path)
-
+                    'best_iou_miou_sum': best_iou_miou_sum,
+                    'metrics': metrics
+                }
+                model_engine.save_checkpoint(best_path, client_state=client_state)
                 logger.info(f"Saved new best iou+miou model with score: {best_iou_miou_sum:.4f}")
+            
+            # 保存当前检查点
             os.makedirs(args.output_dir, exist_ok=True)
-            current_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}.pt')
-            prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}.pt')
-            torch.save({
+            current_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}')
+            client_state = {
                 'epoch': epoch + 1,
-                'model_state_dict': model.module.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'torch_amp_scaler': scaler.state_dict(),
                 'best_iou_miou_sum': best_iou_miou_sum
-            }, current_checkpoint)
+            }
+            model_engine.save_checkpoint(current_checkpoint, client_state=client_state)
+            
+            # 删除前一个检查点
+            prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}')
             if os.path.exists(prev_checkpoint):
-                os.remove(prev_checkpoint)
-            # 打印当前 best_iou_miou_model.pt 的 epoch 和指标
-            best_path = os.path.join(args.output_dir, 'best_iou_miou_model.pt')
-            if os.path.exists(best_path):
-                best_ckpt = torch.load(best_path, map_location='cpu')
-                best_epoch = best_ckpt.get('epoch', '-')
-                best_metrics = best_ckpt.get('metrics', {})
-                logger.info(f"Current best iou+miou sum: {best_ckpt.get('best_iou_miou_sum', '-'):.4f} (epoch {best_epoch})")
-                def safe_format(value):
-                    return f"{value:.4f}" if isinstance(value, float) else str(value)
-
-                logger.info(
-                    f"Best model metrics: "
-                    f"mIoU={safe_format(best_metrics.get('mIoU', '-'))}, "
-                    f"IoU={safe_format(best_metrics.get('IoU', '-'))}, "
-                    f"pointM={safe_format(best_metrics.get('pointM', '-'))}"
-                )
+                import shutil
+                shutil.rmtree(prev_checkpoint)
+    
     dist.destroy_process_group()
 
 if __name__ == '__main__':
     import torch.multiprocessing as mp
     mp.set_start_method('fork', force=True)
-    main() 
+    main()
     # 在训练结束后评估四个数据集
     evaluate_four_datasets()

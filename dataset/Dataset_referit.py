@@ -28,7 +28,9 @@ def load_referit_gt_mask(mask_path):
 def save_tmp_mask(input_path, save_name):
     m1 = load_referit_gt_mask(input_path)
     cv2.imwrite(save_name, m1*255)
-
+# ✅ 将 lambda 函数定义为模块级函数（可被 pickle）
+def squeeze_and_long(x):
+    return x.squeeze().long()
 
 class ReferitDataset(torch.utils.data.Dataset):
     def __init__(self, root, split="train", loader=pil_loader, max_tokens=20, negative_samples=0, pseudo_path=None, test_split=None, size=320, clip=False):
@@ -46,7 +48,7 @@ class ReferitDataset(torch.utils.data.Dataset):
         self.mask_transform = transforms.Compose([
             transforms.Resize((size, size), interpolation=transforms.InterpolationMode.NEAREST),  # 避免插值产生非整数标签
             transforms.PILToTensor(),       # 保持 int 类型，不归一化
-            transforms.Lambda(lambda x: x.squeeze().long())  # 若是单通道，去掉通道维度并转为 LongTensor
+            transforms.Lambda(squeeze_and_long)  # 若是单通道，去掉通道维度并转为 LongTensor
         ])
         # Initialize tokenizers
         self.clip = clip
