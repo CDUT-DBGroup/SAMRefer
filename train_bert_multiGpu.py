@@ -89,39 +89,39 @@ def main():
 
     if logger:
         logger.info("Creating datasets...")
-    train_dataset_coco = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    val_dataset_coco = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=True,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    train_dataset_cocoplus = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco+',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
+    # train_dataset_coco = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # val_dataset_coco = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='val',
+    #     eval_mode=True,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_cocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     # val_dataset_cocoplus = ReferDataset(
     #     refer_data_root=args.data_root,
     #     dataset='refcoco+',
@@ -133,17 +133,17 @@ def main():
     #     size=getattr(args, 'img_size', 320),
     #     precision=args.precision
     # )
-    train_dataset_cocog = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcocog',
-        splitBy='umd',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
+    # train_dataset_cocog = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcocog',
+    #     splitBy='umd',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     # val_dataset_cocog = ReferDataset(
     #     refer_data_root=args.data_root,
     #     dataset='refcocog',
@@ -156,15 +156,20 @@ def main():
     #     precision=args.precision
     # )
     train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
-    # val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
-
-
+    val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog, train_referit
+        train_referit
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco#, val_referit# val_dataset_cocoplus#, val_referit,
+        val_referit,
     ])
+
+    # train_dataset = torch.utils.data.ConcatDataset([
+    #     train_dataset_coco, train_dataset_cocoplus, train_dataset_cocog, train_referit
+    # ])
+    # val_dataset = torch.utils.data.ConcatDataset([
+    #     val_dataset_coco#, val_referit# val_dataset_cocoplus#, val_referit,
+    # ])
 
     if logger:
         logger.info("Creating data loaders...")
@@ -326,11 +331,13 @@ def main():
             metrics = validate(model, val_loader, device)
             logger.info(f"Validation metrics for epoch {epoch+1}:")
             logger.info(f"mIoU: {metrics['mIoU']:.4f}")
-            logger.info(f"IoU: {metrics['IoU']:.4f}")
+            logger.info(f"oIoU: {metrics['oIoU']:.4f}")
+            logger.info(f"gIoU: {metrics['gIoU']:.4f}")
+            logger.info(f"Acc: {metrics['Acc']:.4f}")
             logger.info(f"pointM: {metrics['pointM']:.4f}")
             logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
             # Save best iou+miou model
-            iou_miou_sum = metrics['IoU'] + metrics['mIoU']
+            iou_miou_sum = metrics['oIoU'] + metrics['mIoU']
             if iou_miou_sum > best_iou_miou_sum:
                 best_iou_miou_sum = iou_miou_sum
                 os.makedirs(args.output_dir, exist_ok=True)
