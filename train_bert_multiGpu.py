@@ -133,7 +133,7 @@ def main():
      train_dataset_coco#,train_referit,
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco#val_referit,
+        val_dataset_coco#,val_referit,
     ])
 
     if logger:
