@@ -161,7 +161,7 @@ class ReferSAM(nn.Module):
 
         if self.training:
             if self.criterion is not None:
-                losses = self.criterion(pred_masks, targets, coarse_masks)
+                losses = self.criterion(pred_masks.float(), targets.float(), coarse_masks.float())
                 return losses
 
         # 在验证时返回概率值，让验证函数来处理二值化

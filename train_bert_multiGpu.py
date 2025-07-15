@@ -18,7 +18,7 @@ import torch.nn as nn
 import torch.distributed as dist
 import deepspeed
 from deepspeed.ops.adam import DeepSpeedCPUAdam
-
+import json
 # 内存优化设置
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = False
@@ -55,14 +55,28 @@ def count_parameters(model):
 
 def main():
     # 初始化 DeepSpeed
-    ds_config = deepspeed.init_distributed()
+    deepspeed.init_distributed()  # 只做初始化，不赋值
+    args = get_args()
+    # 确保 config 是文件路径字符串
+    if hasattr(args, 'deepspeed_config') and args.deepspeed_config:
+        ds_config = args.deepspeed_config
+    else:
+        ds_config = 'ds_config.json'
+
+    with open(ds_config) as f:
+        ds_conf = json.load(f)
+    use_fp16 = ds_conf.get("fp16", {}).get("enabled", False)
+    use_bf16 = ds_conf.get("bf16", {}).get("enabled", False)
+
+    
+    
+
+    assert os.path.exists(ds_config), f"DeepSpeed config 文件不存在: {ds_config}"
     local_rank = int(os.environ["LOCAL_RANK"])
     world_size = dist.get_world_size()
     rank = dist.get_rank()
     torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{local_rank}")
-
-    args = get_args()
     os.makedirs(args.output_dir, exist_ok=True)
     logger = setup_logger(args.output_dir, rank)
     if logger:
@@ -119,15 +133,15 @@ def main():
         train_dataset,
         batch_size=args.batch_size,
         sampler=train_sampler,
-        num_workers=0,  # 如果内存不足，设置为0
-        pin_memory=False  # 如果内存不足，设置为False
+        num_workers=8,  # 如果内存不足，设置为0
+        pin_memory=True  # 如果内存不足，设置为False
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=args.batch_size,
         sampler=val_sampler,
-        num_workers=0,  # 如果内存不足，设置为0
-        pin_memory=False  # 如果内存不足，设置为False
+        num_workers=8,  # 如果内存不足，设置为0
+        pin_memory = True  # 如果内存不足，设置为False
     )
 
     # 初始化 DeepSpeed 引擎
@@ -144,7 +158,7 @@ def main():
     model_engine, optimizer, _, _ = deepspeed.initialize(
         model=model,
         model_parameters=param_groups,
-        config=args.deepspeed_config if hasattr(args, 'deepspeed_config') else 'ds_config.json'
+        config=ds_config
     )
 
     # resume support
@@ -179,7 +193,13 @@ def main():
         else:
             pbar = train_loader
         for batch_idx, (samples, targets) in enumerate(pbar):
-            img = samples['img'].to(device, non_blocking=True).half()
+            # img = samples['img'].to(device, non_blocking=True)#.half()
+            if use_fp16:
+                img = samples['img'].to(device, non_blocking=True).half()
+            elif use_bf16:
+                img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
+            else:
+                img = samples['img'].to(device, non_blocking=True)
             word_ids = samples['word_ids'].to(device, non_blocking=True)
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)
@@ -253,7 +273,7 @@ def main():
             logger.info(f"\nValidating epoch {epoch+1}...")
             # 临时切换到评估模式
             model_engine.eval()
-            metrics = validate(model_engine.module, val_loader, device)
+            metrics = validate(model_engine.module, val_loader, device, use_fp16, use_bf16)
             model_engine.train()
             
             logger.info(f"Validation metrics for epoch {epoch+1}:")

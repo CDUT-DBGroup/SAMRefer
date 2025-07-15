@@ -95,7 +95,7 @@ def calculate_point_metric(pred_mask, target_mask, num_points=100):
 #     return correct.item()
 
 # 这个是我新加的，不一定稳定可用，需要测试
-def validate(model, val_loader, device):
+def validate(model, val_loader, device, use_fp16=False, use_bf16=False):
     model.eval()
 
     total_intersection = 0.0
@@ -111,7 +111,13 @@ def validate(model, val_loader, device):
 
     with torch.no_grad():
         for batch_idx, (samples, targets) in enumerate(tqdm(val_loader, desc='Validating')):
-            img = samples['img'].to(device, non_blocking=True)
+            #img = samples['img'].to(device, non_blocking=True)#.half()
+            if use_fp16:
+                img = samples['img'].to(device, non_blocking=True).half()
+            elif use_bf16:
+                img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
+            else:
+                img = samples['img'].to(device, non_blocking=True)
             word_ids = samples['word_ids'].to(device, non_blocking=True)
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)  # [B,H,W]

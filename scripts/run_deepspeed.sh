@@ -14,15 +14,10 @@ export CUDA_LAUNCH_BLOCKING=0  # 设置为0以提高性能
 
 # DeepSpeed 参数
 NUM_GPUS=1  # 根据你的GPU数量调整
-BATCH_SIZE=16  # 每个GPU的batch size
-GRADIENT_ACCUMULATION=4  # 梯度累积步数
 
 # 启动 DeepSpeed 训练
 deepspeed --num_gpus $NUM_GPUS \
     train_bert_multiGpu.py \
-    --deepspeed_config ds_config.json \
-    --batch_size $BATCH_SIZE \
-    --epochs 15 \
-    --lr 1e-4 \
-    --output_dir ./outputs/deepspeed_training \
-    --tokenizer_type bert-base-uncased \
+    --deepspeed_config configs/ds_config.json
+
+/usr/bin/shutdown -h now
