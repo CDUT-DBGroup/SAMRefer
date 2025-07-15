@@ -1,5 +1,5 @@
 {
-    "train_batch_size": 32,
+    "train_batch_size": 30,
     "gradient_accumulation_steps": 3,
     "optimizer": {
       "type": "AdamW",

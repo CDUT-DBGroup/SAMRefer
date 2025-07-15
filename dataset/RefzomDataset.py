@@ -257,8 +257,6 @@ class ReferzomDataset(data.Dataset):
                  eval_mode=False,
                  size=480,
                  precision='fp32'):
-
-        from refer import REFER  # 确保你有正确的 REFER 类
         self.clip = 'clip' in bert_tokenizer
         self.split = split
         self.dataset_type = dataset
@@ -278,7 +276,7 @@ class ReferzomDataset(data.Dataset):
         if self.clip:
             self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
         else:
-            self.tokenizer = BertTokenizer.from_pretrained(bert_tokenizer)
+            self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased/')
 
         # Load REFER
         self.refer = REFER(refer_data_root, dataset, splitBy)
@@ -343,8 +341,8 @@ class ReferzomDataset(data.Dataset):
 
         ref = self.refer.loadRefs(ref_id)[0]
         mask = self.refer.getMask(ref)['mask']  # dict with 'mask': numpy array
-        bbox = self.refer.Anns[ref['ann_id']]['bbox']
-        bbox = np.array([bbox[0], bbox[1], bbox[0]+bbox[2], bbox[1]+bbox[3]])
+        # bbox = self.refer.getRefBox(ref_id)
+        # bbox = np.array([bbox[0], bbox[1], bbox[0]+bbox[2], bbox[1]+bbox[3]])
 
         h, w = mask.shape
         annot = Image.fromarray(mask.astype(np.uint8), mode="P")
@@ -375,7 +373,7 @@ class ReferzomDataset(data.Dataset):
             "mask": annot,
             "img_path": img_meta['file_name'],
             "sentences": sentence,
-            "boxes": bbox,
+            "boxes": None,
             "orig_size": np.array([h, w]),
             "img_full_path": img_path,
         }
