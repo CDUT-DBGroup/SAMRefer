@@ -116,13 +116,24 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
-    val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
+    val_dataset_coco = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='val',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
+    # train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
+    # val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     train_dataset = torch.utils.data.ConcatDataset([
-        train_referit, train_dataset_coco
+     train_dataset_coco#,train_referit,
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_referit,
+        val_dataset_coco#val_referit,
     ])
 
     if logger:
@@ -193,13 +204,13 @@ def main():
         else:
             pbar = train_loader
         for batch_idx, (samples, targets) in enumerate(pbar):
-            # img = samples['img'].to(device, non_blocking=True)#.half()
-            if use_fp16:
-                img = samples['img'].to(device, non_blocking=True).half()
-            elif use_bf16:
-                img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
-            else:
-                img = samples['img'].to(device, non_blocking=True)
+            img = samples['img'].to(device, non_blocking=True)
+            # if use_fp16:
+            #     img = samples['img'].to(device, non_blocking=True).half()
+            # elif use_bf16:
+            #     img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
+            # else:
+            #     img = samples['img'].to(device, non_blocking=True)
             word_ids = samples['word_ids'].to(device, non_blocking=True)
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)

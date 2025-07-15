@@ -9,6 +9,7 @@ from random import choice
 
 from transformers import BertTokenizer, CLIPTokenizer
 from torchvision import transforms
+from get_args import get_args
 from refer_refzom import REFER
 import copy
 import random
@@ -250,20 +251,20 @@ class ReferzomDataset(data.Dataset):
                  refer_data_root='data',
                  dataset='ref-zom',
                  splitBy='final',
-                 bert_tokenizer='bert-base-uncased',
+                 bert_tokenizer='bert-base-uncased/',
                  max_tokens=30,
                  split='train',
                  eval_mode=False,
                  size=480,
                  precision='fp32'):
 
-        self.clip = ('clip' in bert_tokenizer)
+        from refer import REFER  # 确保你有正确的 REFER 类
+        self.clip = 'clip' in bert_tokenizer
         self.split = split
-        self.refer = REFER(refer_data_root, dataset, splitBy)
         self.dataset_type = dataset
-        self.size = size
         self.eval_mode = eval_mode
         self.max_tokens = max_tokens
+        self.size = size
 
         # Precision setting
         if precision == "bf16":
@@ -273,57 +274,58 @@ class ReferzomDataset(data.Dataset):
         else:
             self.torch_dtype = torch.float32
 
+        # Init tokenizer
         if self.clip:
             self.tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
         else:
             self.tokenizer = BertTokenizer.from_pretrained(bert_tokenizer)
 
+        # Load REFER
+        self.refer = REFER(refer_data_root, dataset, splitBy)
         self.ref_ids = self.refer.getRefIds(split=self.split)
-        img_ids = self.refer.getImgIds(self.ref_ids)
-        self.imgs = list(self.refer.Imgs[i] for i in img_ids)
 
         self.input_ids = []
         self.word_masks = []
         self.all_sentences = []
-        self.refid2index = {}
+        self.img_ids = []
+        self.bboxes = []
 
-        for index, r in enumerate(self.ref_ids):
-            self.refid2index[r] = index
-            ref = self.refer.Refs[r]
+        for ref_id in self.ref_ids:
+            ref = self.refer.Refs[ref_id]
+            img_id = ref['image_id']
+            self.img_ids.append(img_id)
 
-            sentences_for_ref = []
-            attentions_for_ref = []
+            ref_sent_ids = []
+            ref_masks = []
             raw_sentences = []
 
-            for sent_dict in ref['sentences']:
-                sentence_raw = sent_dict['raw']
-
+            for sent in ref['sentences']:
+                sentence = sent['raw']
                 tokens = self.tokenizer(
-                    sentence_raw,
+                    sentence,
                     max_length=self.max_tokens,
                     padding='max_length',
                     truncation=True,
                     return_tensors='pt'
                 )
-                word_id = tokens['input_ids'].squeeze(0)
-                word_mask = tokens['attention_mask'].squeeze(0)
+                ref_sent_ids.append(tokens['input_ids'].squeeze(0))
+                ref_masks.append(tokens['attention_mask'].squeeze(0))
+                raw_sentences.append(sentence)
 
-                sentences_for_ref.append(word_id)
-                attentions_for_ref.append(word_mask)
-                raw_sentences.append(sentence_raw)
-
-            self.input_ids.append(sentences_for_ref)
-            self.word_masks.append(attentions_for_ref)
+            self.input_ids.append(ref_sent_ids)
+            self.word_masks.append(ref_masks)
             self.all_sentences.append(raw_sentences)
 
         # Define transforms
         self.image_transform = transforms.Compose([
-            transforms.Resize((size, size)),
+            transforms.Resize((self.size, self.size)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
         ])
+
         self.mask_transform = transforms.Compose([
-            transforms.Resize((size, size), interpolation=transforms.InterpolationMode.NEAREST),
+            transforms.Resize((self.size, self.size), interpolation=transforms.InterpolationMode.NEAREST),
             transforms.PILToTensor(),
             transforms.Lambda(lambda x: x.squeeze().long())
         ])
@@ -332,54 +334,62 @@ class ReferzomDataset(data.Dataset):
         return len(self.ref_ids)
 
     def __getitem__(self, index):
-        this_ref_id = self.ref_ids[index]
-        this_img_id = self.refer.getImgIds(this_ref_id)
-        this_img = self.refer.Imgs[this_img_id[0]]
+        ref_id = self.ref_ids[index]
+        img_id = self.img_ids[index]
+        img_meta = self.refer.Imgs[img_id]
 
-        img_full_path = os.path.join(self.refer.IMAGE_DIR, this_img['file_name'])
-        img = Image.open(img_full_path).convert("RGB")
+        img_path = os.path.join(self.refer.IMAGE_DIR, img_meta['file_name'])
+        image = Image.open(img_path).convert("RGB")
 
-        ref = self.refer.loadRefs(this_ref_id)[0]
-
+        ref = self.refer.loadRefs(ref_id)[0]
+        mask = self.refer.getMask(ref)['mask']  # dict with 'mask': numpy array
         bbox = self.refer.Anns[ref['ann_id']]['bbox']
-        bbox = np.array(bbox, dtype=int)
-        bbox[2], bbox[3] = bbox[0] + bbox[2], bbox[1] + bbox[3]
+        bbox = np.array([bbox[0], bbox[1], bbox[0]+bbox[2], bbox[1]+bbox[3]])
 
-        ref_mask = np.array(self.refer.getMask(ref)['mask'])
-        annot = np.zeros(ref_mask.shape)
-        annot[ref_mask == 1] = 1
-        annot = Image.fromarray(annot.astype(np.uint8), mode="P")
+        h, w = mask.shape
+        annot = Image.fromarray(mask.astype(np.uint8), mode="P")
 
-        h, w = ref_mask.shape
-        img = self.image_transform(img)
-        annot = self.mask_transform(annot)
+        # Transform image and mask
+        image = self.image_transform(image)
+        annot = self.mask_transform(annot).float()
 
+        # Choose a sentence
         if self.eval_mode:
-            choice_sent = 0
+            sent_idx = 0
         else:
-            choice_sent = np.random.choice(len(self.input_ids[index]))
+            sent_idx = random.randint(0, len(self.input_ids[index]) - 1)
 
-        word_ids = self.input_ids[index][choice_sent]
-        word_masks = self.word_masks[index][choice_sent]
-        sentence = self.all_sentences[index][choice_sent]
-
-        img_path = int(img_full_path.split('.')[0].split('_')[-1])
+        word_ids = self.input_ids[index][sent_idx].to(dtype=torch.long)
+        word_masks = self.word_masks[index][sent_idx].to(dtype=torch.long)
+        sentence = self.all_sentences[index][sent_idx]
 
         samples = {
-            "img": img,
+            "img": image,
             "orig_size": np.array([h, w]),
             "text": sentence,
-            "word_ids": word_ids.to(dtype=torch.long),
-            "word_masks": word_masks.to(dtype=torch.long),
+            "word_ids": word_ids,
+            "word_masks": word_masks,
         }
 
         targets = {
-            "mask": annot.to(dtype=torch.float32),
-            "img_path": img_path,
+            "mask": annot,
+            "img_path": img_meta['file_name'],
             "sentences": sentence,
             "boxes": bbox,
             "orig_size": np.array([h, w]),
-            "img_full_path": img_full_path
+            "img_full_path": img_path,
         }
 
         return samples, targets
+    
+if __name__=="__main__":
+    args = get_args()
+    dataset = ReferzomDataset(
+        refer_data_root=args.data_root,
+        dataset='ref-zom',
+        splitBy='final',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=30,
+        split='train',
+    )
+    print(dataset.__getitem__(0))

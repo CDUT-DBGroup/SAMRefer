@@ -6,8 +6,7 @@ from ..vit_adapter import *
 import numpy as np
 from PIL import Image
 from torch.nn.init import trunc_normal_
-
-
+from torch.cuda.amp import autocast
 
 class ReferSAM(nn.Module):
     def __init__(self, sam_model, text_encoder, args, num_classes=1, criterion=None, **kwargs):
@@ -100,6 +99,87 @@ class ReferSAM(nn.Module):
             )
         dense_pe = self.sam_prompt_encoder.pe_layer(spatial_shape).unsqueeze(0)
         return sparse_embeddings, dense_embeddings, dense_pe
+    
+    # def forward(self, img, text, l_mask, targets=None, orig_size=None, return_probs=False):
+    #     '''
+    #         img: [B, 3, H, W] tensor
+    #         targets: [B, 1, H, W] tensor
+    #         orig_size: [B, 2] numpy array or tensor (H, W)
+    #     '''
+    #     batch_size = img.shape[0]
+    #     input_shape = img.shape[-2:]
+
+    #     with autocast(dtype=torch.bfloat16, enabled=self.training):  # AMP context for bf16
+    #         # ----------- Text Encoding (保持 float32，尤其是 BERT/CLIP 稳定性) ----------
+    #         if self.using_clip:
+    #             with torch.no_grad():
+    #                 l_feats = self.text_encoder(text, l_mask)[0].float()
+    #         else:
+    #             with autocast(dtype=torch.float32):  # 强制 text_encoder 为 float32
+    #                 l_feats = self.text_encoder(text, l_mask)[0]
+
+    #         # ----------- VL pixel decoder (ViT + Adapter) -----------
+    #         with autocast(dtype=torch.float32):
+    #             adapter_feats_list, vit_feats, l_feats, all_prompts = self.vl_adapter(img, l_feats, l_mask)
+
+    #         mask_feature = adapter_feats_list[0]
+    #         dense_prompts = all_prompts[:, :1]
+    #         sparse_prompts = all_prompts[:, 1:]
+
+    #         dense_prompts = self.mask_embedding(dense_prompts)
+    #         coarse_masks = torch.einsum('bqc,bchw->bqhw', dense_prompts, mask_feature)
+    #         mask_prompt = self.mask_scaling(coarse_masks)
+
+    #         sparse_prompts = self.sparse_embedding(sparse_prompts)
+    #         sparse_embeddings, dense_embeddings, dense_pe = self.encode_prompt(
+    #             vit_feats.shape,
+    #             masks=mask_prompt,
+    #             text_embeds=sparse_prompts
+    #         )
+
+    #         low_res_masks, iou_predictions = self.sam_mask_decoder(
+    #             image_embeddings=vit_feats,
+    #             image_pe=dense_pe,
+    #             sparse_prompt_embeddings=sparse_embeddings.to(dense_embeddings.dtype),
+    #             dense_prompt_embeddings=dense_embeddings,
+    #             multimask_output=False,
+    #         )
+
+    #         low_res_masks = low_res_masks.float()  # 避免精度问题
+    #         coarse_masks = coarse_masks.float()
+
+    #     # ----------- Interpolation & Post-processing outside AMP -----------
+    #     masks = F.interpolate(low_res_masks, size=input_shape, mode='bilinear', align_corners=True)
+    #     pred_masks = masks.squeeze(1)
+    #     coarse_masks = coarse_masks.squeeze(1)
+
+    #     if orig_size is not None:
+    #         if isinstance(orig_size, np.ndarray):
+    #             orig_size = torch.from_numpy(orig_size).to(pred_masks.device)
+    #         if orig_size.dtype != torch.long:
+    #             orig_size = orig_size.long()
+    #         pred_masks_up = []
+    #         for i in range(pred_masks.shape[0]):
+    #             h, w = orig_size[i]
+    #             up = F.interpolate(
+    #                 pred_masks[i:i+1].unsqueeze(1),
+    #                 size=(h, w),
+    #                 mode='bilinear',
+    #                 align_corners=False
+    #             ).squeeze(1)
+    #             pred_masks_up.append(up)
+    #         pred_masks = torch.cat(pred_masks_up, dim=0)
+
+    #     if self.training:
+    #         if self.criterion is not None:
+    #             losses = self.criterion(pred_masks, targets, coarse_masks)
+    #             return losses
+
+    #     # ----------- Inference mode output -----------
+    #     if not return_probs:
+    #         pred_masks = pred_masks.sigmoid()
+    #         pred_masks = (pred_masks >= 0.5).long()
+    #     return pred_masks
 
     def forward(self, img, text, l_mask, targets=None, orig_size=None, return_probs=False):
         '''
@@ -161,7 +241,7 @@ class ReferSAM(nn.Module):
 
         if self.training:
             if self.criterion is not None:
-                losses = self.criterion(pred_masks.float(), targets.float(), coarse_masks.float())
+                losses = self.criterion(pred_masks, targets, coarse_masks)
                 return losses
 
         # 在验证时返回概率值，让验证函数来处理二值化
