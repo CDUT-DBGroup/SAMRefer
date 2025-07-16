@@ -307,3 +307,63 @@ class InteractionBlock(nn.Module):
                                                                                  reference_points=deform_inputs2[0], spatial_shapes=deform_inputs1[1], level_start_index=deform_inputs1[2], vis_pos=lvl_pos_emb)
 
         return vit_feats, adapter_feats, lang_feats, prompts
+
+
+class BiFusionInteractionBlock(nn.Module):
+    def __init__(self, dim, lang_dim, vl_dim=1024, num_heads=6, vl_heads=16, n_points=4,
+                 norm_layer=partial(nn.LayerNorm, eps=1e-6), drop=0., drop_path=0.,
+                 with_cffn=True, cffn_ratio=0.25, init_values=0., deform_ratio=1.0,
+                 with_cp=False, num_fusion=2):
+        super().__init__()
+        self.num_fusion = num_fusion
+
+        # 多层注入器和提取器实现双向交互
+        self.injectors = nn.ModuleList([
+            Injector(dim=dim, n_levels=3, num_heads=num_heads, init_values=init_values,
+                     n_points=n_points, norm_layer=norm_layer, deform_ratio=deform_ratio,
+                     with_cp=with_cp) for _ in range(num_fusion)
+        ])
+        self.extractors = nn.ModuleList([
+            Extractor(dim=dim, n_levels=1, num_heads=num_heads, n_points=n_points,
+                      norm_layer=norm_layer, deform_ratio=deform_ratio, with_cffn=False,
+                      cffn_ratio=cffn_ratio, drop=drop, drop_path=drop_path, with_cp=with_cp,
+                      v_pre_norm=True) for _ in range(num_fusion)
+        ])
+        self.vl_extractors = nn.ModuleList([
+            VLBiAttnLayer(dim, lang_dim, vl_dim, vl_heads, n_levels=3,
+                          mlp_ratio=cffn_ratio, dropout=drop, norm_layer=norm_layer,
+                          with_gamma=True, with_post_norm=True)
+            for _ in range(num_fusion)
+        ])
+
+    def forward(self, vit_feats, adapter_feats, lvl_pos_emb, lang_feats, lang_mask,
+                prompts, blocks, deform_inputs1, deform_inputs2, H, W):
+        B, h, w, C = vit_feats.shape
+        vis_flat = vit_feats.flatten(1, 2)
+
+        for i in range(self.num_fusion):
+            # 图像主干注入 Adapter
+            vis_flat = self.injectors[i](query=vis_flat, reference_points=deform_inputs1[0],
+                                         feat=adapter_feats, spatial_shapes=deform_inputs1[1],
+                                         level_start_index=deform_inputs1[2])
+            vis_feats = vis_flat.reshape(B, h, w, C)
+
+            # transformer block 处理
+            for blk in blocks:
+                vis_feats = blk(vis_feats)
+            vis_flat = vis_feats.flatten(1, 2)
+
+            # Adapter 反向提取主干特征
+            adapter_feats = self.extractors[i](query=adapter_feats, reference_points=deform_inputs2[0],
+                                               feat=vis_flat, spatial_shapes=deform_inputs2[1],
+                                               level_start_index=deform_inputs2[2], H=H, W=W)
+
+            # 图文交互
+            adapter_feats, lang_feats, prompts = self.vl_extractors[i](
+                adapter_feats, lang_feats, prompts, lang_mask=lang_mask,
+                reference_points=deform_inputs2[0], spatial_shapes=deform_inputs1[1],
+                level_start_index=deform_inputs1[2], vis_pos=lvl_pos_emb
+            )
+
+        vit_feats = vis_flat.reshape(B, h, w, C)
+        return vit_feats, adapter_feats, lang_feats, prompts

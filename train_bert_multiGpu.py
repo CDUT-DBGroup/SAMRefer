@@ -19,6 +19,7 @@ import torch.distributed as dist
 import deepspeed
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 import json
+import shutil
 # 内存优化设置
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = False
@@ -175,13 +176,26 @@ def main():
     # resume support
     start_epoch = 0
     best_iou_miou_sum = 0
-    if rank == 0 and hasattr(args, 'resume') and args.resume and os.path.isfile(args.resume):
-        logger.info(f"Resuming from checkpoint: {args.resume}")
-        _, client_state = model_engine.load_checkpoint(args.resume)
+    if rank == 0 and hasattr(args, 'resume') and args.resume:
+        import glob
+        resume_path = args.resume
+        # 如果 resume_path 是 best_iou_miou_model 目录，自动查找 global_step 子目录
+        if os.path.isdir(resume_path):
+            # 查找所有 global_step 子目录
+            subdirs = glob.glob(os.path.join(resume_path, "global_step*"))
+            if subdirs:
+                # 取最新的 global_step 子目录
+                latest_subdir = max(subdirs, key=os.path.getmtime)
+                logger.info(f"Resuming from checkpoint: {latest_subdir}")
+            else:
+                logger.info(f"Resuming from checkpoint: {resume_path}")
+        else:
+            logger.info(f"Resuming from checkpoint: {resume_path}")
+        # 实际上 load_checkpoint 只需要传父目录，deepspeed 会自动找最新 global_step
+        _, client_state = model_engine.load_checkpoint(resume_path)
         start_epoch = client_state.get('epoch', 0)
         best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
         logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
-    
     # broadcast resume info to all ranks
     start_epoch_tensor = torch.tensor([start_epoch], dtype=torch.int, device=device)
     best_iou_miou_sum_tensor = torch.tensor([best_iou_miou_sum], dtype=torch.float, device=device)
@@ -301,6 +315,11 @@ def main():
                 best_iou_miou_sum = iou_miou_sum
                 os.makedirs(args.output_dir, exist_ok=True)
                 best_path = os.path.join(args.output_dir, 'best_iou_miou_model')
+                best_path = os.path.join(args.output_dir, 'best_iou_miou_model')
+                # 保存前清空
+                if os.path.exists(best_path):
+                    shutil.rmtree(best_path)
+                os.makedirs(best_path, exist_ok=True)
                 
                 # 使用 DeepSpeed 保存检查点
                 client_state = {
@@ -323,7 +342,6 @@ def main():
             # 删除前一个检查点
             prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}')
             if os.path.exists(prev_checkpoint):
-                import shutil
                 shutil.rmtree(prev_checkpoint)
     
     dist.destroy_process_group()

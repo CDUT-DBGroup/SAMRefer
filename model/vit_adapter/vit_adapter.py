@@ -11,6 +11,67 @@ from mmdet.models.layers import SinePositionalEncoding
 from model.vit_adapter.adapter_modules import *
 
 
+class BiResidualFusion(nn.Module):
+    def __init__(self, out_dim):
+        super().__init__()
+        self.proj_c2 = nn.Conv2d(out_dim, out_dim, 1)
+        self.proj_c3 = nn.Conv2d(out_dim, out_dim, 1)
+        self.proj_c4 = nn.Conv2d(out_dim, out_dim, 1)
+
+        self.down_c2_to_c3 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 3, stride=2, padding=1),
+            nn.GroupNorm(1, out_dim),
+            nn.GELU()
+        )
+        self.down_c3_to_c4 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 3, stride=2, padding=1),
+            nn.GroupNorm(1, out_dim),
+            nn.GELU()
+        )
+        self.up_c4_to_c3 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 1),
+            nn.GroupNorm(1, out_dim),
+            nn.GELU()
+        )
+        self.up_c3_to_c2 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 1),
+            nn.GroupNorm(1, out_dim),
+            nn.GELU()
+        )
+
+        self.fuse_c2 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 3, padding=1),
+            nn.GroupNorm(1, out_dim),
+            nn.GELU()
+        )
+        self.fuse_c3 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 3, padding=1),
+            nn.GroupNorm(1, out_dim),
+            nn.GELU()
+        )
+        self.fuse_c4 = nn.Sequential(
+            nn.Conv2d(out_dim, out_dim, 3, padding=1),
+            nn.GroupNorm(1, out_dim),
+            nn.GELU()
+        )
+
+    def forward(self, c2, c3, c4):
+        # Downsample for top-down path
+        c2_down = self.down_c2_to_c3(c2)
+        c3_down = self.down_c3_to_c4(c3)
+
+        # Upsample for bottom-up path
+        c4_up = F.interpolate(self.up_c4_to_c3(c4), size=c3.shape[-2:], mode='bilinear', align_corners=False)
+        c3_up = F.interpolate(self.up_c3_to_c2(c3), size=c2.shape[-2:], mode='bilinear', align_corners=False)
+
+        # 双向融合 + 残差增强
+        fused_c2 = self.fuse_c2(c2 + c3_up)
+        fused_c3 = self.fuse_c3(c3 + c2_down + c4_up)
+        fused_c4 = self.fuse_c4(c4 + c3_down)
+
+        return fused_c2, fused_c3, fused_c4
+
+
 class ViTAdapter(nn.Module):
     def __init__(self, vis_model, vis_dim, lang_dim, vl_dim = 768, num_prompts=[10, 8], conv_inplane=64, n_points=4, deform_ratio=1.0, 
                  deform_num_heads=6, interaction_indexes=[[0, 1, 2, 3, 4, 5], [6, 7, 8, 9, 10, 11]], with_cffn=True, init_values=0.,

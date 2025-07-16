@@ -23,7 +23,7 @@ def get_args():
     # Add DeepSpeed specific parameters
     parser.add_argument('--deepspeed_config', type=str, default='ds_config.json', help='Path to DeepSpeed config file')
     parser.add_argument('--local_rank', type=int, default=-1, help='Local rank for distributed training')
-    parser.add_argument('--resume', type=str, help='Resume training from checkpoint')
+    # parser.add_argument('--resume', type=str, help='Resume training from checkpoint')
 
     # Step 4: 解析所有参数（命令行优先）
     args = parser.parse_args()
