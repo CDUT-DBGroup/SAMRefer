@@ -2,6 +2,8 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from torchvision import transforms
+
+from model.vit_adapter.vit_adapter_fusion import ViTAdapterWithBiFusion
 from ..vit_adapter import *
 import numpy as np
 from PIL import Image
@@ -17,8 +19,10 @@ class ReferSAM(nn.Module):
         self.vis_dim = sam_model.image_encoder.embed_dim
         self.lang_dim = self.text_encoder.config.hidden_size
         self.decoder_dim = self.sam_mask_decoder.transformer_dim
-
-        self.vl_adapter = ViTAdapter(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
+        #最初的 
+        # self.vl_adapter = ViTAdapter(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
+        #使用我修改的,添加了双向融合的
+        self.vl_adapter = ViTAdapterWithBiFusion(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
         self.mask_embedding = nn.Sequential(nn.Linear(self.decoder_dim, self.decoder_dim), 
                                           nn.GELU(), 
                                           nn.Linear(self.decoder_dim, self.decoder_dim))
@@ -183,8 +187,8 @@ class ReferSAM(nn.Module):
 
     def forward(self, img, text, l_mask, targets=None, orig_size=None, return_probs=False):
         '''
-            img: [B, 3, H, W] tensor
-            targets: [B, 1, H, W] tensor
+            img: [B, 3, H, W] tensor [10,3,320,320]
+            targets: [B, 1, H, W] tensor []
             orig_size: [B, 2] numpy array or tensor (H, W)
         '''
         batch_size = img.shape[0]
@@ -196,6 +200,10 @@ class ReferSAM(nn.Module):
                 l_feats = self.text_encoder(text, l_mask)[0]
         else:
             l_feats = self.text_encoder(text, l_mask)[0]
+
+        # print(img.shape)[B,3,320,320]
+        # print(l_feats.shape)[B,30,768]
+        # print(l_mask.shape)[B,30]
         # VL pixel decoder
         adapter_feats_list, vit_feats, l_feats, all_prompts = self.vl_adapter(img, l_feats, l_mask)
 

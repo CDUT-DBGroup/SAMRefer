@@ -198,11 +198,17 @@ class ViTAdapterWithBiFusion(nn.Module):
         c4 = self.adapter_proj[2](adapter_feats[:, c2.size(1) + c3.size(1):, :])
 
         # 还原为特征图形式并融合
-        c2_map = c2.transpose(1, 2).reshape(B, -1, h * 2, w * 2)
-        c3_map = c3.transpose(1, 2).reshape(B, -1, h, w)
-        c4_map = c4.transpose(1, 2).reshape(B, -1, h // 2, w // 2)
+        c2_map = c2.transpose(1, 2).reshape(B, -1, h * 2, w * 2) # [2,256,40,40]
+        c3_map = c3.transpose(1, 2).reshape(B, -1, h, w) # [2,256,20,20]
+        c4_map = c4.transpose(1, 2).reshape(B, -1, h // 2, w // 2) # [2,256,10,10]
         c2_map, c3_map, c4_map = self.bidirectional_fusion(c2_map, c3_map, c4_map)
         adapter_feats_list = [c2_map, c3_map, c4_map]
+
+        # === 新增：融合后还原为token序列，拼接为adapter_feats，供后续prompt block使用 ===
+        c2_tokens = c2_map.flatten(2).transpose(1, 2)  # [B, HW/8^2, C] 这个对应原本的c2、c3、c4
+        c3_tokens = c3_map.flatten(2).transpose(1, 2)  # [B, HW/16^2, C]
+        c4_tokens = c4_map.flatten(2).transpose(1, 2)  # [B, HW/32^2, C]
+        adapter_feats = torch.cat([c2_tokens, c3_tokens, c4_tokens], dim=1)  # [B, HW/8^2+HW/16^2+HW/32^2, C] [2,2100,256]
 
         if self.with_deconv:
             c1 = self.c1_norm(self.c1_conv(c1))
@@ -231,4 +237,67 @@ class ViTAdapterWithBiFusion(nn.Module):
         vit_feats = vit_feats + c3_map
 
         return adapter_feats_list, vit_feats, lang_feats, all_prompts
+
+
+if __name__ == "__main__":
+    import torch
+    from transformers import BertTokenizer, BertModel
+    from model.segment_anything import sam_model_registry
+    from get_args import get_args
+    args = get_args()
+    # 1. 构造真实SAM backbone
+    sam_type = "vit_b"  # 你可以改成vit_l/vit_h
+    sam_model = sam_model_registry[sam_type](checkpoint=args.checkpoint)
+    sam_model.eval()
+
+    # 2. 构造真实BERT文本编码器
+    tokenizer = BertTokenizer.from_pretrained(args.ck_bert)
+    text_encoder = BertModel.from_pretrained(args.ck_bert)
+    text_encoder.eval()
+
+    # 3. 构造一组假文本
+    texts = ["a cat on the mat", "a dog in the park"]
+    tokens = tokenizer(texts, padding="max_length", max_length=30, truncation=True, return_tensors="pt")
+    word_ids = tokens["input_ids"]  # [B, L]
+    word_masks = tokens["attention_mask"]  # [B, L]
+
+    # 4. 构造一组假图片
+    B, C, H, W = 2, 3, 320, 320
+    img = torch.randn(B, C, H, W)
+
+    # 5. 获取文本特征
+    with torch.no_grad():
+        lang_feats = text_encoder(input_ids=word_ids, attention_mask=word_masks)[0]  # [B, L, 768]
+
+    # 6. 构造ViTAdapter
+    from model.vit_adapter.vit_adapter_fusion import ViTAdapterWithBiFusion
+    adapter_kwargs = dict(
+        vl_dim=768,
+        num_prompts=[16, 4],
+        conv_inplane=64,
+        n_points=4,
+        deform_ratio=0.5,
+        deform_num_heads=12,
+        interaction_indexes=[[0, 2], [3, 5], [6, 8], [9, 11]],
+        with_cffn=True,
+        init_values=1e-6,
+        cffn_ratio=2.0,
+        add_vit_feature=False,
+        drop_path_rate=0.0,
+        dropout=0.0,
+        with_cp=False,
+        with_deconv=True,
+        num_extra_layers=2,
+        num_prompt_layers=2,
+        using_clip=False
+    )
+    vis_model = sam_model.image_encoder
+    model = ViTAdapterWithBiFusion(vis_model, vis_dim=768, lang_dim=768, **adapter_kwargs)
+    model.eval()
+
+    with torch.no_grad():
+        out = model(img, lang_feats, word_masks)
+        print("ViTAdapter 返回格式：")
+        for i, o in enumerate(out):
+            print(f"output[{i}]: shape={o.shape}, dtype={o.dtype}")
 

@@ -10,7 +10,7 @@ from random import choice
 from transformers import BertTokenizer, CLIPTokenizer
 from torchvision import transforms
 from get_args import get_args
-from refer_refzom import REFER
+from dataset.refer_refzom import REFER
 import copy
 import random
 import torch
@@ -335,8 +335,10 @@ class ReferzomDataset(data.Dataset):
         ref_id = self.ref_ids[index]
         img_id = self.img_ids[index]
         img_meta = self.refer.Imgs[img_id]
-
-        img_path = os.path.join(self.refer.IMAGE_DIR, img_meta['file_name'])
+        if img_meta['file_name'].startswith('COCO_train2014'):
+            img_path = os.path.join(self.refer.IMAGE_DIR, img_meta['file_name'])
+        else:
+            img_path = os.path.join(self.refer.IMAGE_DIR.replace('train2014', 'val2014'), img_meta['file_name'])
         image = Image.open(img_path).convert("RGB")
 
         ref = self.refer.loadRefs(ref_id)[0]
@@ -373,7 +375,7 @@ class ReferzomDataset(data.Dataset):
             "mask": annot,
             "img_path": img_meta['file_name'],
             "sentences": sentence,
-            "boxes": None,
+            # "boxes": None,
             "orig_size": np.array([h, w]),
             "img_full_path": img_path,
         }

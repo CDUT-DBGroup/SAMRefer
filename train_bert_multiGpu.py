@@ -7,6 +7,7 @@ from tqdm import tqdm
 import numpy as np
 from dataset.Dataset_referit import ReferitDataset
 from dataset.ReferDataset import ReferDataset
+from dataset.RefzomDataset import ReferzomDataset
 from get_args import get_args
 from model.builder import refersam
 from validate_bert import evaluate_four_datasets
@@ -106,10 +107,21 @@ def main():
 
     if logger:
         logger.info("Creating datasets...")
-    train_dataset_coco = ReferDataset(
+    # train_dataset_coco = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    train_dataset_zom = ReferzomDataset(
         refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
+        dataset='ref-zom',
+        splitBy='final',
         bert_tokenizer=args.tokenizer_type,
         max_tokens=getattr(args, 'max_tokens', 30),
         split='train',
@@ -117,10 +129,10 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    val_dataset_coco = ReferDataset(
+    val_dataset_zom = ReferzomDataset(
         refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
+        dataset='ref-zom',
+        splitBy='final',
         bert_tokenizer=args.tokenizer_type,
         max_tokens=getattr(args, 'max_tokens', 30),
         split='val',
@@ -128,13 +140,24 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
+    # val_dataset_coco = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='val',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     # train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     # val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     train_dataset = torch.utils.data.ConcatDataset([
-     train_dataset_coco#,train_referit,
+     train_dataset_zom#train_dataset_coco#,train_referit,
     ])
     val_dataset = torch.utils.data.ConcatDataset([
-        val_dataset_coco#,val_referit,
+        val_dataset_zom#val_dataset_coco#,val_referit,
     ])
 
     if logger:
