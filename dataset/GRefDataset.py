@@ -95,6 +95,12 @@ class GRefDataset(data.Dataset):
         return len(self.ref_ids)
 
     def __getitem__(self, index):
+        # 跳过空input_ids样本
+        if len(self.input_ids[index]) == 0:
+            # 随机采样一个新index，递归调用
+            new_index = random.randint(0, len(self.input_ids) - 1)
+            return self.__getitem__(new_index)
+
         ref_id = self.ref_ids[index]
         img_id = self.img_ids[index]
         img_meta = self.refer.Imgs[img_id]

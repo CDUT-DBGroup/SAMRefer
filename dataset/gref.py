@@ -37,9 +37,10 @@ class G_REFER:
         # provide data_root folder which contains grefcoco
         print('loading dataset %s into memory...' % dataset)
         self.ROOT_DIR = osp.abspath(osp.dirname(__file__))
-        self.DATA_DIR = osp.join(data_root, dataset)
+        # self.DATA_DIR = osp.join(data_root, dataset)
+        self.DATA_DIR = osp.join(data_root, 'refer', dataset)
         if dataset in ['grefcoco']:
-            self.IMAGE_DIR = osp.join(data_root, 'images/train2014')
+            self.IMAGE_DIR = osp.join(data_root, 'train2014')
         else:
             raise KeyError('No refer dataset is called [%s]' % dataset)
 

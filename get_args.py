@@ -7,7 +7,7 @@ def get_args():
     # Step 1: 预解析 config 文件路径
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', type=str, required=False, help='Path to config file', default='configs/main_refersam_bert.yaml')
-    parser.add_argument('--deepspeed_config', type=str, default='ds_config.json', help='Path to DeepSpeed config file')
+    parser.add_argument('--deepspeed_config', type=str, default='configs/ds_config.json', help='Path to DeepSpeed config file')
     args_config_only, remaining_argv = parser.parse_known_args()
 
     # Step 2: 加载 YAML 配置文件

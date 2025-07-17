@@ -20,9 +20,9 @@ class ReferSAM(nn.Module):
         self.lang_dim = self.text_encoder.config.hidden_size
         self.decoder_dim = self.sam_mask_decoder.transformer_dim
         #最初的 
-        # self.vl_adapter = ViTAdapter(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
+        self.vl_adapter = ViTAdapter(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
         #使用我修改的,添加了双向融合的
-        self.vl_adapter = ViTAdapterWithBiFusion(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
+        # self.vl_adapter = ViTAdapterWithBiFusion(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
         self.mask_embedding = nn.Sequential(nn.Linear(self.decoder_dim, self.decoder_dim), 
                                           nn.GELU(), 
                                           nn.Linear(self.decoder_dim, self.decoder_dim))
