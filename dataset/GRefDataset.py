@@ -95,14 +95,24 @@ class GRefDataset(data.Dataset):
         return len(self.ref_ids)
 
     def __getitem__(self, index):
-        # 跳过空input_ids样本
-        if len(self.input_ids[index]) == 0:
-            # 随机采样一个新index，递归调用
-            new_index = random.randint(0, len(self.input_ids) - 1)
-            return self.__getitem__(new_index)
+        # 跳过空input_ids样本，最多尝试10次
+        max_attempts = 10
+        attempt = 0
+        current_index = index
+        
+        while len(self.input_ids[current_index]) == 0 and attempt < max_attempts:
+            current_index = random.randint(0, len(self.input_ids) - 1)
+            attempt += 1
+            
+        # 如果所有尝试都失败，创建一个默认的tensor
+        if len(self.input_ids[current_index]) == 0:
+            # 创建一个默认的tensor
+            default_tensor = torch.zeros(self.max_tokens, dtype=torch.long)
+            default_mask = torch.zeros(self.max_tokens, dtype=torch.long)
+            default_sentence = ""
 
-        ref_id = self.ref_ids[index]
-        img_id = self.img_ids[index]
+        ref_id = self.ref_ids[current_index]
+        img_id = self.img_ids[current_index]
         img_meta = self.refer.Imgs[img_id]
 
         img_path = os.path.join(self.refer.IMAGE_DIR, img_meta['file_name'])
@@ -111,8 +121,17 @@ class GRefDataset(data.Dataset):
         ref = self.refer.loadRefs(ref_id)[0]
         # G_REFER的getMaskByRef方法返回多个mask，需要合并
         mask_data = self.refer.getMaskByRef(ref, merge=True)
-        mask = mask_data['mask']  # numpy array
-        h, w = mask.shape
+        
+        # 检查mask_data是否为空
+        if mask_data.get('empty', False):
+            # 如果为空，创建一个全零mask
+            img_meta = self.refer.Imgs[img_id]
+            mask = np.zeros((img_meta['height'], img_meta['width']), dtype=np.uint8)
+            h, w = mask.shape
+        else:
+            mask = mask_data['mask']  # numpy array
+            h, w = mask.shape
+            
         annot = Image.fromarray(mask.astype(np.uint8), mode="P")
 
         # Transform image and mask
@@ -120,18 +139,38 @@ class GRefDataset(data.Dataset):
         annot = self.mask_transform(annot).float()
 
         # Choose a sentence
-        if self.eval_mode:
-            sent_idx = 0
+        if len(self.input_ids[current_index]) == 0:
+            # 使用默认值
+            word_ids = default_tensor
+            word_masks = default_mask
+            sentence = default_sentence
         else:
-            sent_idx = random.randint(0, len(self.input_ids[index]) - 1)
+            if self.eval_mode:
+                sent_idx = 0
+            else:
+                sent_idx = random.randint(0, len(self.input_ids[current_index]) - 1)
 
-        word_ids = self.input_ids[index][sent_idx].to(dtype=torch.long)
-        word_masks = self.word_masks[index][sent_idx].to(dtype=torch.long)
-        sentence = self.all_sentences[index][sent_idx]
+            word_ids = self.input_ids[current_index][sent_idx].to(dtype=torch.long)
+            word_masks = self.word_masks[current_index][sent_idx].to(dtype=torch.long)
+            sentence = self.all_sentences[current_index][sent_idx]
 
+        # 确保word_ids和word_masks是torch.long类型
+        if isinstance(word_ids, torch.Tensor):
+            word_ids = word_ids.to(dtype=torch.long)
+        else:
+            word_ids = torch.tensor(word_ids, dtype=torch.long)
+            
+        if isinstance(word_masks, torch.Tensor):
+            word_masks = word_masks.to(dtype=torch.long)
+        else:
+            word_masks = torch.tensor(word_masks, dtype=torch.long)
+            
+        # 确保orig_size是numpy数组
+        orig_size = np.array([h, w], dtype=np.int64)
+        
         samples = {
             "img": image,
-            "orig_size": np.array([h, w]),
+            "orig_size": orig_size,
             "text": sentence,
             "word_ids": word_ids,
             "word_masks": word_masks,
@@ -139,9 +178,9 @@ class GRefDataset(data.Dataset):
 
         targets = {
             "mask": annot,
-            "img_path": img_meta['file_name'],
+            "img_path": str(img_meta['file_name']),
             "sentences": sentence,
-            "orig_size": np.array([h, w]),
+            "orig_size": orig_size,
             "img_full_path": img_path,
         }
 

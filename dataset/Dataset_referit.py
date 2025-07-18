@@ -126,9 +126,9 @@ class ReferitDataset(torch.utils.data.Dataset):
         }
         targets = {
             "mask": mask,  # torch.FloatTensor
-            "img_path": int(item["image_id"]),  # int
+            "img_path": str(item["image_id"]),  # int
             "sentences": query,  # str
-            "boxes": bbox,  # np.array([x1, y1, x2, y2])
+            # "boxes": bbox,  # np.array([x1, y1, x2, y2])
             "orig_size": orig_size,  # np.array
             "img_full_path": img_full_path,  # str
         }

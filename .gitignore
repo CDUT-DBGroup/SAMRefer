@@ -259,7 +259,7 @@ Thumbs.db __pycache__/
 *.pyc
 
 # 自定义的排除文件
-scripts/train_1.sh
-configs/student_refersam.yaml
-configs/main_refersam_bert.yaml
-get_args.py
+# scripts/train_1.sh
+# configs/student_refersam.yaml
+# configs/main_refersam_bert.yaml
+# get_args.py

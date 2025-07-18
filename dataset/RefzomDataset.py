@@ -373,7 +373,7 @@ class ReferzomDataset(data.Dataset):
 
         targets = {
             "mask": annot,
-            "img_path": img_meta['file_name'],
+            "img_path": str(img_meta['file_name']),
             "sentences": sentence,
             # "boxes": None,
             "orig_size": np.array([h, w]),

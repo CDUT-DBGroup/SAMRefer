@@ -198,9 +198,9 @@ class ReferDataset(data.Dataset):
 
         targets = {
             "mask": annot,  # tensor
-            "img_path": img_path,
+            "img_path": str(img_path),
             "sentences": sentences,
-            "boxes": bbox,
+            # "boxes": bbox,
             "orig_size": np.array([h, w]),
             "img_full_path": img_full_path
         }

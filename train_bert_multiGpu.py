@@ -121,7 +121,7 @@ def main():
     )
     train_dataset_refcocoplus = ReferDataset(
         refer_data_root=args.data_root,
-        dataset='refcocoplus',
+        dataset='refcoco+',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
         max_tokens=getattr(args, 'max_tokens', 30),
