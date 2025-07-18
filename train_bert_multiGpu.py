@@ -119,39 +119,50 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    train_dataset_refcocoplus = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco+',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    train_dataset_refcocog = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcocog',
-        splitBy='umd',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    train_dataset_zom = ReferzomDataset(
-        refer_data_root=args.data_root,
-        dataset='ref-zom',
-        splitBy='final',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
+    # train_dataset_refcocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_refcocog = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcocog',
+    #     splitBy='umd',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_zom = ReferzomDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='ref-zom',
+    #     splitBy='final',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_gref = GRefDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='grefcoco',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     # val_dataset_zom = ReferzomDataset(
     #     refer_data_root=args.data_root,
     #     dataset='ref-zom',
@@ -163,17 +174,6 @@ def main():
     #     size=getattr(args, 'img_size', 320),
     #     precision=args.precision
     # )
-    train_dataset_gref = GRefDataset(
-        refer_data_root=args.data_root,
-        dataset='grefcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
     # val_dataset_gref = GRefDataset(
     #     refer_data_root=args.data_root,
     #     dataset='grefcoco',
@@ -199,7 +199,7 @@ def main():
     # train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     # val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     train_dataset = torch.utils.data.ConcatDataset([
-     train_dataset_gref,train_dataset_zom,train_dataset_refcocoplus,train_dataset_refcocog,train_dataset_coco#,train_referit,
+     train_dataset_coco,#train_dataset_gref,train_dataset_zom,train_dataset_refcocoplus,train_dataset_refcocog#,train_referit,
     ])
     val_dataset = torch.utils.data.ConcatDataset([
         val_dataset_coco#val_dataset_gref#val_dataset_coco#val_dataset_zom#,val_referit,
@@ -362,9 +362,11 @@ def main():
                                 f"Dice Loss: {current_dice_loss:.4f}")
 
         # Validation and checkpointing only on rank 0
+        save_best = False
+        metrics = None
+
         if rank == 0:
             logger.info(f"\nValidating epoch {epoch+1}...")
-            # 临时切换到评估模式
             model_engine.eval()
             metrics = validate(model_engine.module, val_loader, device, use_fp16, use_bf16)
             model_engine.train()
@@ -376,41 +378,67 @@ def main():
             logger.info(f"Acc: {metrics['Acc']:.4f}")
             logger.info(f"pointM: {metrics['pointM']:.4f}")
             logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
-            
-            # Save best iou+miou model
+
+            # 判断是否为当前最优
             iou_miou_sum = metrics['oIoU'] + metrics['mIoU']
             if iou_miou_sum > best_iou_miou_sum:
                 best_iou_miou_sum = iou_miou_sum
+                save_best = True  # 通知所有进程保存 best 模型
+
+        # 广播保存决策和 metrics 到所有进程
+        save_best_tensor = torch.tensor([int(save_best)], device=device)
+        dist.broadcast(save_best_tensor, src=0)
+        save_best = bool(save_best_tensor.item())
+
+        # 广播 metrics 到所有进程
+        if rank != 0:
+            metrics = {
+                'mIoU': torch.zeros(1, device=device),
+                'oIoU': torch.zeros(1, device=device),
+                'gIoU': torch.zeros(1, device=device),
+                'Acc': torch.zeros(1, device=device),
+                'pointM': torch.zeros(1, device=device),
+                'best_IoU': torch.zeros(1, device=device)
+            }
+        for key in metrics:
+            tensor = metrics[key] if isinstance(metrics[key], torch.Tensor) else torch.tensor([metrics[key]], device=device)
+            dist.broadcast(tensor, src=0)
+            metrics[key] = tensor.item()
+
+        # 所有进程准备 client_state
+        client_state = {
+            'epoch': epoch + 1,
+            'best_iou_miou_sum': best_iou_miou_sum,
+            'metrics': metrics
+        }
+
+        # 保存 best 模型（所有进程都参与保存）
+        if save_best:
+            best_path = os.path.join(args.output_dir, 'best_iou_miou_model')
+            if rank == 0:
                 os.makedirs(args.output_dir, exist_ok=True)
-                best_path = os.path.join(args.output_dir, 'best_iou_miou_model')
-                best_path = os.path.join(args.output_dir, 'best_iou_miou_model')
-                # 保存前清空
                 if os.path.exists(best_path):
                     shutil.rmtree(best_path)
                 os.makedirs(best_path, exist_ok=True)
-                
-                # 使用 DeepSpeed 保存检查点
-                client_state = {
-                    'epoch': epoch + 1,
-                    'best_iou_miou_sum': best_iou_miou_sum,
-                    'metrics': metrics
-                }
-                model_engine.save_checkpoint(best_path, client_state=client_state)
+            dist.barrier()
+            model_engine.save_checkpoint(best_path, client_state=client_state)
+            if rank == 0:
                 logger.info(f"Saved new best iou+miou model with score: {best_iou_miou_sum:.4f}")
-            
-            # 保存当前检查点
+
+        # 保存当前 epoch 的 checkpoint
+        current_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}')
+        if rank == 0:
             os.makedirs(args.output_dir, exist_ok=True)
-            current_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch+1}')
-            client_state = {
-                'epoch': epoch + 1,
-                'best_iou_miou_sum': best_iou_miou_sum
-            }
-            model_engine.save_checkpoint(current_checkpoint, client_state=client_state)
-            
-            # 删除前一个检查点
-            prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}')
-            if os.path.exists(prev_checkpoint):
-                shutil.rmtree(prev_checkpoint)
+        dist.barrier()
+        model_engine.save_checkpoint(current_checkpoint, client_state=client_state)
+        if rank == 0:
+            logger.info(f"Saved checkpoint for epoch {epoch+1}")
+
+        # 删除上一个 checkpoint
+        prev_checkpoint = os.path.join(args.output_dir, f'checkpoint_epoch_{epoch}')
+        if rank == 0 and os.path.exists(prev_checkpoint):
+            shutil.rmtree(prev_checkpoint)
+        dist.barrier()
     
     dist.destroy_process_group()
 
