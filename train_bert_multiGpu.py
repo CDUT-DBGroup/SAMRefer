@@ -94,10 +94,23 @@ def main():
         logger.info("Creating ReferSAM model...")
     model = refersam(args=args)
     model = model.to(device)
-    # 确保模型参数使用正确的数据类型
-    for param in model.parameters():
-        if param.dtype != torch.float32:
-            param.data = param.data.float()
+    
+    # 根据DeepSpeed配置设置模型数据类型
+    if use_fp16:
+        if logger:
+            logger.info("Converting model to fp16 for DeepSpeed")
+        model = model.half()
+    elif use_bf16:
+        if logger:
+            logger.info("Converting model to bf16 for DeepSpeed")
+        model = model.to(torch.bfloat16)
+    else:
+        if logger:
+            logger.info("Using fp32 precision")
+        # 确保模型参数使用正确的数据类型
+        for param in model.parameters():
+            if param.dtype != torch.float32:
+                param.data = param.data.float()
     
     if logger:
         total_params, trainable_params = count_parameters(model)
@@ -286,13 +299,14 @@ def main():
         else:
             pbar = train_loader
         for batch_idx, (samples, targets) in enumerate(pbar):
-            img = samples['img'].to(device, non_blocking=True)
-            # if use_fp16:
-            #     img = samples['img'].to(device, non_blocking=True).half()
-            # elif use_bf16:
-            #     img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
-            # else:
-            #     img = samples['img'].to(device, non_blocking=True)
+            # 根据DeepSpeed配置设置输入数据类型
+            if use_fp16:
+                img = samples['img'].to(device, non_blocking=True).half()
+            elif use_bf16:
+                img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
+            else:
+                img = samples['img'].to(device, non_blocking=True)
+            
             word_ids = samples['word_ids'].to(device, non_blocking=True)
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)
