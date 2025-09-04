@@ -1,0 +1,23 @@
+batch_size: 32
+epochs: 40
+lr: 2e-5
+weight_decay: 0.01
+img_size: 320
+max_tokens: 30
+
+data_root: /public/home/2023020919/vision_paper/paper_data/coco_data
+data_referit_root:  /public/home/2023020919/vision_paper/paper_data/referit
+output_dir: output/refersam_bert/
+
+sam_type: vit_b
+checkpoint: /public/home/2023020919/vision_paper/weight/sam/sam_vit_b_01ec64.pth
+
+tokenizer_type: bert
+ck_bert: /public/home/2023020919/vision_paper/samrefer/bert-base-uncased
+clip_path: null
+
+precision: fp32
+
+pre_train_path: output/refersam_bert/best_iou_miou_model
+# resume: output/refersam_bert/checkpoint_epoch_20
+
