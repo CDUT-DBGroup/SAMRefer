@@ -21,3 +21,10 @@ deepspeed --num_gpus $NUM_GPUS \
     --deepspeed_config configs/ds_config.json
 
 /usr/bin/shutdown -h now
+
+
+#学校服务器的启动命令
+# deepspeed --num_gpus $NUM_GPUS \
+#     train_bert_multiGpu.py \
+#     --deepspeed_config configs/ds_config.json \
+#     --config configs/student.yaml
