@@ -27,4 +27,4 @@ deepspeed --num_gpus $NUM_GPUS \
 # deepspeed --num_gpus $NUM_GPUS \
 #     train_bert_multiGpu.py \
 #     --deepspeed_config configs/ds_config.json \
-#     --config configs/student.yaml > train_0904-all.log 2>&1 
+#     --config configs/student.yaml > train_0904-all.log 2>&1 &

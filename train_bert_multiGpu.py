@@ -132,50 +132,50 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    train_dataset_refcocoplus = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco+',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    train_dataset_refcocog = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcocog',
-        splitBy='umd',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    train_dataset_zom = ReferzomDataset(
-        refer_data_root=args.data_root,
-        dataset='ref-zom',
-        splitBy='final',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    train_dataset_gref = GRefDataset(
-        refer_data_root=args.data_root,
-        dataset='grefcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
+    # train_dataset_refcocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_refcocog = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcocog',
+    #     splitBy='umd',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_zom = ReferzomDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='ref-zom',
+    #     splitBy='final',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    # train_dataset_gref = GRefDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='grefcoco',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='train',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
     # val_dataset_zom = ReferzomDataset(
     #     refer_data_root=args.data_root,
     #     dataset='ref-zom',
@@ -212,7 +212,7 @@ def main():
     # train_referit = ReferitDataset(root = args.data_referit_root, split="train", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     # val_referit = ReferitDataset(root = args.data_referit_root, split="val", max_tokens=getattr(args, 'max_tokens', 30), size=getattr(args, 'img_size', 320))
     train_dataset = torch.utils.data.ConcatDataset([
-     train_dataset_coco,train_dataset_gref,train_dataset_zom,train_dataset_refcocoplus,train_dataset_refcocog#,train_referit,
+     train_dataset_coco#,train_dataset_gref,train_dataset_zom,train_dataset_refcocoplus,train_dataset_refcocog#,train_referit,
     ])
     val_dataset = torch.utils.data.ConcatDataset([
         val_dataset_coco#val_dataset_gref#val_dataset_coco#val_dataset_zom#,val_referit,

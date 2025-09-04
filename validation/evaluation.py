@@ -111,13 +111,13 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False):
 
     with torch.no_grad():
         for batch_idx, (samples, targets) in enumerate(tqdm(val_loader, desc='Validating')):
-            img = samples['img'].to(device, non_blocking=True)#.half()
-            # if use_fp16:
-            #     img = samples['img'].to(device, non_blocking=True).half()
-            # elif use_bf16:
-            #     img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
-            # else:
-            #     img = samples['img'].to(device, non_blocking=True)
+            # 保持与训练阶段一致的精度设置，避免 dtype 不匹配
+            if use_fp16:
+                img = samples['img'].to(device, non_blocking=True).half()
+            elif use_bf16:
+                img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
+            else:
+                img = samples['img'].to(device, non_blocking=True)
             word_ids = samples['word_ids'].to(device, non_blocking=True)
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)  # [B,H,W]
