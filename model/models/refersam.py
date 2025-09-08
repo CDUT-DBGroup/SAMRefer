@@ -3,7 +3,6 @@ from torch import nn
 from torch.nn import functional as F
 from torchvision import transforms
 
-from model.vit_adapter.vit_adapter_fusion import ViTAdapterWithBiFusion
 from ..vit_adapter import *
 import numpy as np
 from PIL import Image
@@ -21,8 +20,6 @@ class ReferSAM(nn.Module):
         self.decoder_dim = self.sam_mask_decoder.transformer_dim
         #最初的 
         self.vl_adapter = ViTAdapter(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
-        #使用我修改的,添加了双向融合的
-        # self.vl_adapter = ViTAdapterWithBiFusion(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
         self.mask_embedding = nn.Sequential(nn.Linear(self.decoder_dim, self.decoder_dim), 
                                           nn.GELU(), 
                                           nn.Linear(self.decoder_dim, self.decoder_dim))
@@ -61,7 +58,9 @@ class ReferSAM(nn.Module):
                                     "mask_embedding", "mask_scaling", "sparse_embedding",
                                     "mask_downscaling", "sam_mask_decoder"]
         else:
-            trainable_param_names = [""]
+            trainable_param_names = ["vl_adapter", 
+                                    "mask_embedding", "mask_scaling", "sparse_embedding",
+                                    "sam_mask_decoder"]
         names_frozen = list()
         names_learnable = list()
         params_learnable = list()

@@ -111,13 +111,6 @@ def main():
         for param in model.parameters():
             if param.dtype != torch.float32:
                 param.data = param.data.float()
-    
-    if logger:
-        total_params, trainable_params = count_parameters(model)
-        logger.info(f"\nModel Parameters:")
-        logger.info(f"Total parameters: {total_params:,}")
-        logger.info(f"Trainable parameters: {trainable_params:,}")
-        logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
 
     if logger:
         logger.info("Creating datasets...")
@@ -246,6 +239,13 @@ def main():
         param_groups = model.params_to_optimize()
     else:
         param_groups = model.parameters()
+
+    if logger:
+        total_params, trainable_params = count_parameters(model)
+        logger.info(f"\nModel Parameters:")
+        logger.info(f"Total parameters: {total_params:,}")
+        logger.info(f"Trainable parameters: {trainable_params:,}")
+        logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
 
     # 初始化 DeepSpeed 引擎
     model_engine, optimizer, _, _ = deepspeed.initialize(
