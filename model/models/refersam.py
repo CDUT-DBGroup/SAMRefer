@@ -52,7 +52,8 @@ class ReferSAM(nn.Module):
 
     def params_to_optimize(self):
         # parameters to optimize
-        trainable_param_names_sam_vit = [""]
+        # 解冻SAM image encoder的最后几层，保持前面层冻结
+        trainable_param_names_sam_vit = ["blocks.11", "blocks.10", "blocks.9", "neck"]  # 解冻最后3层+neck
         if self.using_clip:
             trainable_param_names = ["vl_adapter", 
                                     "mask_embedding", "mask_scaling", "sparse_embedding",
@@ -66,6 +67,7 @@ class ReferSAM(nn.Module):
         params_learnable = list()
         for name, m in self.named_parameters():
             if "vis_model" in name:
+                # 解冻SAM image encoder的最后几层
                 if any([x in name for x in trainable_param_names_sam_vit]):
                     m.requires_grad = True
                     names_learnable.append(name)
