@@ -17,11 +17,11 @@ conda activate SAM
 export PYTHONHASHSEED=123456
 
 # 启动训练
-nohup deepspeed --include localhost:0 train_optimized.py \
+nohup deepspeed --include localhost:0 train_optimized_fixed.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/main_refersam_bert.yaml \
     > train_optimized_$(date +%m%d_%H%M).log 2>&1 &
 
 echo "Training started in background. Check the log file for progress."
 echo "To monitor training: tail -f train_optimized_*.log"
-echo "To stop training: pkill -f train_optimized.py"
+echo "To stop training: pkill -f train_optimized_fixed.py"
