@@ -6,6 +6,7 @@ from torch.nn import functional as F
 def dice_loss(
     inputs: torch.Tensor,
     targets: torch.Tensor,
+    smooth: float = 1e-6,
 ):
     """
     Compute the DICE loss, similar to generalized IOU for masks
@@ -15,13 +16,14 @@ def dice_loss(
         targets: A float tensor with the same shape as inputs. Stores the binary
                  classification label for each element in inputs
                 (0 for the negative class and 1 for the positive class).
+        smooth: Smoothing factor to avoid division by zero
     """
     inputs = inputs.sigmoid()
     inputs = inputs.flatten(1)
     targets = targets.flatten(1)
     numerator = 2 * (inputs * targets).sum(-1)
     denominator = inputs.sum(-1) + targets.sum(-1)
-    loss = 1 - (numerator + 1) / (denominator + 1)
+    loss = 1 - (numerator + smooth) / (denominator + smooth)
     return loss.mean()
 
 dice_loss_jit = torch.jit.script(dice_loss)  # type: torch.jit.ScriptModule
@@ -43,8 +45,14 @@ def sigmoid_ce_loss(
     """
     inputs = inputs.flatten(1)
     targets = targets.flatten(1)
-    loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
-    return loss.mean(1).mean()
+    
+    # 使用focal loss的思想，对难样本给予更高权重
+    ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction='none')
+    p_t = torch.exp(-ce_loss)
+    focal_weight = (1 - p_t) ** 2
+    loss = focal_weight * ce_loss
+    
+    return loss.mean()
 
 sigmoid_ce_loss_jit = torch.jit.script(sigmoid_ce_loss)  # type: torch.jit.ScriptModule
 

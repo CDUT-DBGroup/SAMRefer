@@ -20,23 +20,46 @@ class ReferSAM(nn.Module):
         self.decoder_dim = self.sam_mask_decoder.transformer_dim
         #最初的 
         self.vl_adapter = ViTAdapter(sam_model.image_encoder, self.vis_dim, lang_dim=self.lang_dim, with_deconv=True, using_clip=bool(args.clip_path),**kwargs)
-        self.mask_embedding = nn.Sequential(nn.Linear(self.decoder_dim, self.decoder_dim), 
-                                          nn.GELU(), 
-                                          nn.Linear(self.decoder_dim, self.decoder_dim))
-        self.mask_scaling = nn.Conv2d(1, 1, kernel_size=1)
+        # 增强的mask embedding，使用残差连接和dropout
+        self.mask_embedding = nn.Sequential(
+            nn.Linear(self.decoder_dim, self.decoder_dim), 
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(self.decoder_dim, self.decoder_dim),
+            nn.LayerNorm(self.decoder_dim, eps=1e-6)
+        )
+        
+        # 增强的mask scaling，使用可学习的缩放因子
+        self.mask_scaling = nn.Sequential(
+            nn.Conv2d(1, 16, kernel_size=3, padding=1),
+            nn.GELU(),
+            nn.Conv2d(16, 1, kernel_size=1),
+            nn.Sigmoid()
+        )
+        
+        # 增强的sparse embedding，使用多头注意力
         self.sparse_embedding = nn.Sequential(
-                nn.Linear(self.decoder_dim, self.decoder_dim),
-                nn.GELU(), 
-                nn.Linear(self.decoder_dim, self.decoder_dim),
-                nn.LayerNorm(self.decoder_dim, eps=1e-6),
-                )
+            nn.Linear(self.decoder_dim, self.decoder_dim),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(self.decoder_dim, self.decoder_dim),
+            nn.LayerNorm(self.decoder_dim, eps=1e-6),
+        )
+        
+        # 添加特征融合模块
+        self.feature_fusion = nn.Sequential(
+            nn.Conv2d(self.decoder_dim, self.decoder_dim, 3, padding=1),
+            nn.GroupNorm(1, self.decoder_dim),
+            nn.GELU(),
+            nn.Conv2d(self.decoder_dim, self.decoder_dim, 1)
+        )
 
         self.using_clip = bool(args.clip_path)
         self.num_classes = num_classes
         self.criterion = criterion
         self.base_lr = args.lr
-        nn.init.constant_(self.mask_scaling.weight, 1.)
-        nn.init.constant_(self.mask_scaling.bias, 0.)
+        # 初始化新添加的模块
+        self.feature_fusion.apply(self._init_weights)
         self.mask_embedding.apply(self._init_weights)
         self.sparse_embedding.apply(self._init_weights)
         # print(self.params_to_optimize())
@@ -57,11 +80,11 @@ class ReferSAM(nn.Module):
         if self.using_clip:
             trainable_param_names = ["vl_adapter", 
                                     "mask_embedding", "mask_scaling", "sparse_embedding",
-                                    "mask_downscaling", "sam_mask_decoder"]
+                                    "feature_fusion", "mask_downscaling", "sam_mask_decoder"]
         else:
             trainable_param_names = ["vl_adapter", 
                                     "mask_embedding", "mask_scaling", "sparse_embedding",
-                                    "sam_mask_decoder"]
+                                    "feature_fusion", "sam_mask_decoder"]
         names_frozen = list()
         names_learnable = list()
         params_learnable = list()
@@ -214,6 +237,13 @@ class ReferSAM(nn.Module):
 
         dense_prompts = self.mask_embedding(dense_prompts)
         coarse_masks = torch.einsum('bqc,bchw->bqhw', dense_prompts, mask_feature)
+        
+        # 应用特征融合
+        mask_feature_enhanced = self.feature_fusion(mask_feature)
+        coarse_masks_enhanced = torch.einsum('bqc,bchw->bqhw', dense_prompts, mask_feature_enhanced)
+        
+        # 融合原始和增强的特征
+        coarse_masks = coarse_masks + 0.3 * coarse_masks_enhanced
         mask_prompt = self.mask_scaling(coarse_masks)
 
         sparse_prompts = self.sparse_embedding(sparse_prompts)

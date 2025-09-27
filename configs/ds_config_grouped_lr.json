@@ -1,0 +1,85 @@
+{
+    "train_batch_size": 32,
+    "gradient_accumulation_steps": 2,
+    "optimizer": {
+      "type": "AdamW",
+      "params": {
+        "lr": 5e-5,
+        "betas": [0.9, 0.999],
+        "eps": 1e-8,
+        "weight_decay": 0.01
+      }
+    },
+    "scheduler": {
+      "type": "WarmupLR",
+      "params": {
+        "warmup_min_lr": 0,
+        "warmup_max_lr": 2e-5,
+        "warmup_num_steps": 3000
+      }
+    },
+    "fp16": {
+      "enabled": false
+    },
+    "bf16": {
+      "enabled": true
+    },
+    "zero_optimization": {
+      "stage": 2,
+      "allgather_partitions": true,
+      "allgather_bucket_size": 2e8,
+      "overlap_comm": true,
+      "reduce_scatter": true,
+      "reduce_bucket_size": 2e8,
+      "contiguous_gradients": true
+    },
+    "gradient_clipping": 0.5,
+    "steps_per_print": 10,
+    "wall_clock_breakdown": false,
+    "grouped_lr": {
+      "enabled": true,
+      "groups": [
+        {
+          "name": "new_modules",
+          "lr": 2e-5,
+          "weight_decay": 0.01,
+          "patterns": [
+            "vl_adapter.multilayer_injector",
+            "vl_adapter.aspp",
+            "vl_adapter.ppm", 
+            "vl_adapter.film_modulators",
+            "mask_embedding",
+            "mask_scaling",
+            "sparse_embedding"
+          ]
+        },
+        {
+          "name": "sam_decoder",
+          "lr": 2e-5,
+          "weight_decay": 0.01,
+          "patterns": [
+            "sam_mask_decoder"
+          ]
+        },
+        {
+          "name": "sam_encoder",
+          "lr": 1e-5,
+          "weight_decay": 0.01,
+          "patterns": [
+            "blocks.9",
+            "blocks.10", 
+            "blocks.11",
+            "neck"
+          ]
+        },
+        {
+          "name": "text_encoder",
+          "lr": 1e-6,
+          "weight_decay": 0.01,
+          "patterns": [
+            "text_encoder"
+          ]
+        }
+      ]
+    }
+  }

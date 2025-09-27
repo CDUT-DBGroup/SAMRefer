@@ -1,9 +1,11 @@
 batch_size: 16
-epochs: 20
-lr: 2e-5
+epochs: 30
+lr: 1e-5
 weight_decay: 0.01
-img_size: 320
+img_size: 384
 max_tokens: 30
+warmup_epochs: 3
+cosine_lr: true
 
 data_root: /root/autodl-tmp/paper_data/coco_data
 data_referit_root: /root/autodl-tmp/paper_data/referit
