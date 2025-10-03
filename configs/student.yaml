@@ -2,8 +2,10 @@ batch_size: 32
 epochs: 40
 lr: 2e-5
 weight_decay: 0.01
-img_size: 320
+img_size: 384
 max_tokens: 30
+warmup_epochs: 3
+cosine_lr: true
 
 data_root: /public/home/2023020919/vision_paper/paper_data/coco_data
 data_referit_root:  /public/home/2023020919/vision_paper/paper_data/referit
