@@ -235,6 +235,25 @@ def main():
     
     if logger:
         logger.info("Starting enhanced training...")
+        
+        # 打印loss配置信息
+        if getattr(args, 'use_enhanced_loss', False):
+            logger.info("=== Enhanced Loss Configuration ===")
+            logger.info(f"Loss config path: {getattr(args, 'loss_config_path', 'None')}")
+            
+            # 打印loss缩放因子
+            if hasattr(model_engine.module, 'criterion') and hasattr(model_engine.module.criterion, 'loss_scaling_factors'):
+                scaling_factors = model_engine.module.criterion.loss_scaling_factors
+                logger.info(f"Loss scaling factors: {scaling_factors}")
+            
+            # 打印自适应权重信息
+            if hasattr(model_engine.module, 'criterion') and hasattr(model_engine.module.criterion, 'adaptive_weighting'):
+                if hasattr(model_engine.module.criterion.adaptive_weighting, 'log_vars'):
+                    init_weights = torch.exp(model_engine.module.criterion.adaptive_weighting.log_vars).detach().cpu().numpy()
+                    logger.info(f"Initial adaptive weights: {init_weights}")
+                    logger.info(f"Temperature: {model_engine.module.criterion.adaptive_weighting.temperature}")
+            
+            logger.info("=" * 40)
     
     global_step = 0
     for epoch in range(start_epoch, args.epochs):
@@ -324,9 +343,74 @@ def main():
             if logger:
                 pbar.set_postfix(postfix_dict)
                 if (batch_idx + 1) % 10 == 0:
-                    logger.info(f"Enhanced Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
-                                f"Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - "
-                                f"Dice Loss: {current_dice_loss:.4f}")
+                    # 详细的loss打印
+                    log_msg = f"Enhanced Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
+                    log_msg += f"Total Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - Dice Loss: {current_dice_loss:.4f}"
+                    
+                    # 添加增强loss组件
+                    if getattr(args, 'use_enhanced_loss', False):
+                        if 'loss_focal' in loss_dict:
+                            current_focal = total_focal_loss / (batch_idx + 1)
+                            log_msg += f" - Focal Loss: {current_focal:.4f}"
+                        if 'loss_iou' in loss_dict:
+                            current_iou = total_iou_loss / (batch_idx + 1)
+                            log_msg += f" - IoU Loss: {current_iou:.4f}"
+                        if 'loss_boundary' in loss_dict:
+                            current_boundary = total_boundary_loss / (batch_idx + 1)
+                            log_msg += f" - Boundary Loss: {current_boundary:.4f}"
+                        
+                        # 打印当前batch的loss权重（如果可用）
+                        if 'loss_weights' in loss_dict:
+                            weights = loss_dict['loss_weights']
+                            if isinstance(weights, torch.Tensor):
+                                weights_list = weights.detach().cpu().numpy()
+                                log_msg += f" - Weights: {weights_list}"
+                        
+                        # 每50个batch打印一次详细的权重变化
+                        if (batch_idx + 1) % 50 == 0 and 'loss_weights' in loss_dict:
+                            weights = loss_dict['loss_weights']
+                            if isinstance(weights, torch.Tensor):
+                                weights_list = weights.detach().cpu().numpy()
+                                logger.info(f"  Current Loss Weights: {weights_list}")
+                                logger.info(f"  Weight Sum: {weights_list.sum():.4f}")
+                    
+                    # 打印当前batch的各个loss数值
+                    log_msg += f"\n  Current Batch Losses:"
+                    log_msg += f" Total: {loss.item():.4f}, Mask: {loss_dict['loss_mask'].item():.4f}, Dice: {loss_dict['loss_dice'].item():.4f}"
+                    
+                    if getattr(args, 'use_enhanced_loss', False):
+                        if 'loss_focal' in loss_dict:
+                            log_msg += f", Focal: {loss_dict['loss_focal'].item():.4f}"
+                        if 'loss_iou' in loss_dict:
+                            log_msg += f", IoU: {loss_dict['loss_iou'].item():.4f}"
+                        if 'loss_boundary' in loss_dict:
+                            log_msg += f", Boundary: {loss_dict['loss_boundary'].item():.4f}"
+                    
+                    logger.info(log_msg)
+
+        # 打印epoch结束时的详细loss统计
+        if rank == 0 and logger:
+            avg_loss = total_loss / len(train_loader)
+            avg_mask_loss = total_mask_loss / len(train_loader)
+            avg_dice_loss = total_dice_loss / len(train_loader)
+            
+            logger.info(f"\n=== Enhanced Epoch {epoch+1} Loss Summary ===")
+            logger.info(f"Average Total Loss: {avg_loss:.4f}")
+            logger.info(f"Average Mask Loss: {avg_mask_loss:.4f}")
+            logger.info(f"Average Dice Loss: {avg_dice_loss:.4f}")
+            
+            if getattr(args, 'use_enhanced_loss', False):
+                if 'loss_focal' in loss_dict:
+                    avg_focal_loss = total_focal_loss / len(train_loader)
+                    logger.info(f"Average Focal Loss: {avg_focal_loss:.4f}")
+                if 'loss_iou' in loss_dict:
+                    avg_iou_loss = total_iou_loss / len(train_loader)
+                    logger.info(f"Average IoU Loss: {avg_iou_loss:.4f}")
+                if 'loss_boundary' in loss_dict:
+                    avg_boundary_loss = total_boundary_loss / len(train_loader)
+                    logger.info(f"Average Boundary Loss: {avg_boundary_loss:.4f}")
+            
+            logger.info("=" * 50)
 
         # 验证和保存 (保持原有逻辑)
         save_best = False

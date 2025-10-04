@@ -14,8 +14,17 @@ focal_gamma: 2.0         # 聚焦参数，越大越关注难分类样本
 # Boundary Loss parameters - 边界损失参数
 boundary_kernel_size: 3  # 边界检测核大小
 
+# Loss scaling factors - 损失缩放因子（用于平衡不同loss的数值范围）
+loss_scaling_factors:
+  ce: 1.0                # 交叉熵损失缩放因子
+  dice: 1.0              # Dice损失缩放因子
+  focal: 0.1             # Focal损失缩放因子（降低影响）
+  iou: 0.1               # IoU损失缩放因子（降低影响）
+  boundary: 0.05         # 边界损失缩放因子（进一步降低影响）
+
 # Adaptive weighting parameters - 自适应权重参数
-adaptive_init_weights: [1.0, 1.0, 1.0, 1.0, 1.0]  # [ce, dice, focal, iou, boundary]初始权重
+adaptive_init_weights: [1.0, 1.0, 0.1, 0.1, 0.05]  # [ce, dice, focal, iou, boundary]初始权重
+adaptive_temperature: 2.0  # 自适应权重的温度参数，控制权重分布的平滑度
 
 # Point sampling parameters (inherited from original) - 点采样参数
 num_points: 12544        # 112*112

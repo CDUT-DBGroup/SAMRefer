@@ -49,3 +49,4 @@ echo "To stop training: pkill -f train_enhanced_loss.py"
 # # 成功则关机
 # /usr/bin/shutdown -h now
 
+# scp -P 10961 train_loss_1003_1904.log root@connect.cqa1.seetacloud.com:/root/autodl-tmp/vision_paper/ReferSAM/

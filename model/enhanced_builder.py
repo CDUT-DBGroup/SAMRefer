@@ -99,7 +99,8 @@ def refersam_enhanced(pretrained=None, args=None, loss_config_path=None):
         use_adaptive_weighting=loss_config.get('use_adaptive_weighting', True),
         focal_alpha=loss_config.get('focal_alpha', 0.25),
         focal_gamma=loss_config.get('focal_gamma', 2.0),
-        boundary_kernel_size=loss_config.get('boundary_kernel_size', 3)
+        boundary_kernel_size=loss_config.get('boundary_kernel_size', 3),
+        loss_scaling_factors=loss_config.get('loss_scaling_factors', None)
     )
     
     return _segm_refersam_enhanced(pretrained, args, criterion)
