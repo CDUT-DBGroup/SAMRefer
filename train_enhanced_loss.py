@@ -3,7 +3,12 @@
 Enhanced training script with improved loss functions
 使用增强损失函数的训练脚本
 """
+import filelock
+filelock.FileLock = filelock.SoftFileLock
+import deepspeed.ops.transformer.inference.triton.matmul_ext as matmul_ext
 
+matmul_ext.FileLock = filelock.SoftFileLock
+print(">>> Patched matmul_ext.FileLock -> SoftFileLock")
 import os
 import sys
 import torch
@@ -80,24 +85,19 @@ def count_parameters(model):
 
 def main():
     # 解析命令行参数
-    parser = argparse.ArgumentParser(description='Enhanced ReferSAM Training')
-    parser = add_enhanced_loss_args(parser)
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser(description='Enhanced ReferSAM Training')
+    # parser = add_enhanced_loss_args(parser)
+    # args, unknown = parser.parse_known_args()
     
     # 初始化 DeepSpeed
     deepspeed.init_distributed()
     
     # 获取原始参数
-    original_args = get_args()
-    
-    # 合并增强损失参数
-    for attr in ['use_enhanced_loss', 'loss_config_path', 'loss_ablation']:
-        if hasattr(args, attr):
-            setattr(original_args, attr, getattr(args, attr))
+    args = get_args()
     
     # 确保 config 是文件路径字符串
-    if hasattr(original_args, 'deepspeed_config') and original_args.deepspeed_config:
-        ds_config = original_args.deepspeed_config
+    if hasattr(args, 'deepspeed_config') and args.deepspeed_config:
+        ds_config = args.deepspeed_config
     else:
         ds_config = 'ds_config.json'
 
@@ -112,29 +112,29 @@ def main():
     rank = dist.get_rank()
     torch.cuda.set_device(local_rank)
     device = torch.device(f"cuda:{local_rank}")
-    os.makedirs(original_args.output_dir, exist_ok=True)
-    logger = setup_logger(original_args.output_dir, rank)
+    os.makedirs(args.output_dir, exist_ok=True)
+    logger = setup_logger(args.output_dir, rank)
     
     if logger:
         logger.info(f"Starting Enhanced DeepSpeed training: rank {rank}, world_size {world_size}")
-        logger.info(f"Enhanced loss enabled: {getattr(original_args, 'use_enhanced_loss', False)}")
-        logger.info(f"Loss config path: {getattr(original_args, 'loss_config_path', 'None')}")
-        logger.info(f"Loss ablation mode: {getattr(original_args, 'loss_ablation', 'all')}")
+        logger.info(f"Enhanced loss enabled: {getattr(args, 'use_enhanced_loss', True)}")
+        logger.info(f"Loss config path: {getattr(args, 'loss_config_path', 'None')}")
+        logger.info(f"Loss ablation mode: {getattr(args, 'loss_ablation', 'all')}")
 
     # 创建模型
     if logger:
         logger.info("Creating Enhanced ReferSAM model...")
     
-    if getattr(original_args, 'use_enhanced_loss', False):
+    if getattr(args, 'use_enhanced_loss', False):
         model = refersam_enhanced(
             pretrained=None, 
-            args=original_args, 
-            loss_config_path=getattr(original_args, 'loss_config_path', None)
+            args=args, 
+            loss_config_path=getattr(args, 'loss_config_path', None)
         )
         if logger:
             logger.info("Using Enhanced Loss Functions: Focal + IoU + Boundary + Adaptive Weighting")
     else:
-        model = refersam_original(pretrained=None, args=original_args)
+        model = refersam_original(pretrained=None, args=args)
         if logger:
             logger.info("Using Original Loss Functions: CE + Dice")
     
@@ -160,27 +160,27 @@ def main():
     if logger:
         logger.info("Creating datasets...")
     train_dataset_coco = ReferDataset(
-        refer_data_root=original_args.data_root,
+        refer_data_root=args.data_root,
         dataset='refcoco',
         splitBy='unc',
-        bert_tokenizer=original_args.tokenizer_type,
-        max_tokens=getattr(original_args, 'max_tokens', 30),
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
         split='train',
         eval_mode=False,
-        size=getattr(original_args, 'img_size', 320),
-        precision=original_args.precision
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
     )
     
     val_dataset_coco = ReferDataset(
-        refer_data_root=original_args.data_root,
+        refer_data_root=args.data_root,
         dataset='refcoco',
         splitBy='unc',
-        bert_tokenizer=original_args.tokenizer_type,
-        max_tokens=getattr(original_args, 'max_tokens', 30),
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
         split='val',
         eval_mode=False,
-        size=getattr(original_args, 'img_size', 320),
-        precision=original_args.precision
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
     )
     
     train_dataset = torch.utils.data.ConcatDataset([train_dataset_coco])
@@ -192,14 +192,14 @@ def main():
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
     train_loader = DataLoader(
         train_dataset,
-        batch_size=original_args.batch_size,
+        batch_size=args.batch_size,
         sampler=train_sampler,
         num_workers=12,
         pin_memory=True
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=original_args.batch_size,
+        batch_size=args.batch_size,
         sampler=val_sampler,
         num_workers=8,
         pin_memory=True
@@ -237,7 +237,7 @@ def main():
         logger.info("Starting enhanced training...")
     
     global_step = 0
-    for epoch in range(start_epoch, original_args.epochs):
+    for epoch in range(start_epoch, args.epochs):
         model_engine.train()
         train_sampler.set_epoch(epoch)
         total_loss = 0
@@ -245,13 +245,13 @@ def main():
         total_dice_loss = 0
         
         # 增强损失的统计
-        if getattr(original_args, 'use_enhanced_loss', False):
+        if getattr(args, 'use_enhanced_loss', False):
             total_focal_loss = 0
             total_iou_loss = 0
             total_boundary_loss = 0
         
         if logger:
-            pbar = tqdm(train_loader, disable=not sys.stdout.isatty(), desc=f'Enhanced Epoch {epoch+1}/{original_args.epochs}')
+            pbar = tqdm(train_loader, disable=not sys.stdout.isatty(), desc=f'Enhanced Epoch {epoch+1}/{args.epochs}')
         else:
             pbar = train_loader
             
@@ -294,7 +294,7 @@ def main():
             total_dice_loss += loss_dict['loss_dice'].item()
             
             # 增强损失统计
-            if getattr(original_args, 'use_enhanced_loss', False):
+            if getattr(args, 'use_enhanced_loss', False):
                 if 'loss_focal' in loss_dict:
                     total_focal_loss += loss_dict['loss_focal'].item()
                 if 'loss_iou' in loss_dict:
@@ -313,7 +313,7 @@ def main():
                 'dice_loss': current_dice_loss
             }
             
-            if getattr(original_args, 'use_enhanced_loss', False):
+            if getattr(args, 'use_enhanced_loss', False):
                 if 'loss_focal' in loss_dict:
                     postfix_dict['focal_loss'] = total_focal_loss / (batch_idx + 1)
                 if 'loss_iou' in loss_dict:
@@ -324,7 +324,7 @@ def main():
             if logger:
                 pbar.set_postfix(postfix_dict)
                 if (batch_idx + 1) % 10 == 0:
-                    logger.info(f"Enhanced Epoch {epoch+1}/{original_args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
+                    logger.info(f"Enhanced Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
                                 f"Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - "
                                 f"Dice Loss: {current_dice_loss:.4f}")
 
@@ -381,9 +381,9 @@ def main():
 
         # 保存模型
         if save_best:
-            best_path = os.path.join(original_args.output_dir, 'enhanced_best_iou_miou_model')
+            best_path = os.path.join(args.output_dir, 'enhanced_best_iou_miou_model')
             if rank == 0:
-                os.makedirs(original_args.output_dir, exist_ok=True)
+                os.makedirs(args.output_dir, exist_ok=True)
                 if os.path.exists(best_path):
                     shutil.rmtree(best_path)
                 os.makedirs(best_path, exist_ok=True)
@@ -393,16 +393,16 @@ def main():
                 logger.info(f"Saved new enhanced best iou+miou model with score: {best_iou_miou_sum:.4f}")
 
         # 保存当前 epoch 的 checkpoint
-        current_checkpoint = os.path.join(original_args.output_dir, f'enhanced_checkpoint_epoch_{epoch+1}')
+        current_checkpoint = os.path.join(args.output_dir, f'enhanced_checkpoint_epoch_{epoch+1}')
         if rank == 0:
-            os.makedirs(original_args.output_dir, exist_ok=True)
+            os.makedirs(args.output_dir, exist_ok=True)
         dist.barrier()
         model_engine.save_checkpoint(current_checkpoint, client_state=client_state)
         if rank == 0:
             logger.info(f"Saved enhanced checkpoint for epoch {epoch+1}")
 
         # 删除上一个 checkpoint
-        prev_checkpoint = os.path.join(original_args.output_dir, f'enhanced_checkpoint_epoch_{epoch}')
+        prev_checkpoint = os.path.join(args.output_dir, f'enhanced_checkpoint_epoch_{epoch}')
         if rank == 0 and os.path.exists(prev_checkpoint):
             shutil.rmtree(prev_checkpoint)
         dist.barrier()

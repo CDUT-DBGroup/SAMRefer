@@ -210,7 +210,7 @@ class EnhancedSegMaskLoss(nn.Module):
         
         return self.adaptive_weighting(losses)
     
-    def loss_masks(self, src_masks, target_masks):
+    def loss_masks(self, src_masks: torch.Tensor, target_masks: torch.Tensor) -> dict:
         """Compute all mask losses"""
         # Prepare masks
         src_masks_4d = src_masks[:, None]  # [B, 1, H, W]
@@ -255,9 +255,20 @@ class EnhancedSegMaskLoss(nn.Module):
             losses["loss_iou"] = iou_loss(point_logits, point_labels)
         
         if self.use_boundary:
-            # For boundary loss, we need full resolution masks
+            # 确保边界损失使用相同尺寸的掩码
+            # 将src_masks调整到与target_masks相同的尺寸
+            if src_masks.shape != target_masks.shape:
+                src_masks_resized = F.interpolate(
+                    src_masks.unsqueeze(1), 
+                    size=target_masks.shape[-2:], 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze(1)
+            else:
+                src_masks_resized = src_masks
+                
             losses["loss_boundary"] = boundary_loss(
-                src_masks, target_masks, 
+                src_masks_resized, target_masks, 
                 kernel_size=self.boundary_kernel_size
             )
         
