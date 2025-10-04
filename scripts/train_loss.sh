@@ -21,10 +21,12 @@ export FILELOCK_DEFAULT_CLASS=SoftFileLock
  #启动训练
 export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 
-nohup deepspeed --num_gpus $NUM_GPUS train_optimized_fixed.py \
+nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_loss.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/student.yaml \
-    > train_optimized_$(date +%m%d_%H%M).log 2>&1 &
+    --use_enhanced_loss \
+    --loss_config_path configs/enhanced_loss_config.yaml \
+     > train_loss_$(date +%m%d_%H%M).log 2>&1 &
 
 echo "Training started in background. Check the log file for progress."
 echo "To monitor training: tail -f train_optimized_*.log"

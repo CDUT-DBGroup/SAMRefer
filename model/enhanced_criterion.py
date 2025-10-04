@@ -278,11 +278,10 @@ class EnhancedSegMaskLoss(nn.Module):
         
         return losses
 
-
 # JIT compiled versions for better performance
-focal_loss_jit = torch.jit.script(focal_loss)
-iou_loss_jit = torch.jit.script(iou_loss)
-boundary_loss_jit = torch.jit.script(boundary_loss)
+#focal_loss_jit = torch.jit.script(focal_loss)
+#iou_loss_jit = torch.jit.script(iou_loss)
+#boundary_loss_jit = torch.jit.script(boundary_loss)
 
 
 # Enhanced criterion dictionary

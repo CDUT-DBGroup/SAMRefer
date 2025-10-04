@@ -1,3 +1,9 @@
+import filelock
+filelock.FileLock = filelock.SoftFileLock
+import deepspeed.ops.transformer.inference.triton.matmul_ext as matmul_ext
+
+matmul_ext.FileLock = filelock.SoftFileLock
+print(">>> Patched matmul_ext.FileLock -> SoftFileLock")
 import os
 import sys
 import torch
@@ -130,6 +136,50 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
+    train_dataset_refcocoplus = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco+',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='train',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
+    train_dataset_refcocog = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcocog',
+        splitBy='umd',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='train',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
+    train_dataset_zom = ReferzomDataset(
+        refer_data_root=args.data_root,
+        dataset='ref-zom',
+        splitBy='final',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='train',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
+    train_dataset_gref = GRefDataset(
+        refer_data_root=args.data_root,
+        dataset='grefcoco',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='train',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
     
     val_dataset_coco = ReferDataset(
         refer_data_root=args.data_root,
@@ -144,7 +194,7 @@ def main():
     )
     
     train_dataset = torch.utils.data.ConcatDataset([
-     train_dataset_coco#,train_dataset_gref,train_dataset_zom,train_dataset_refcocoplus,train_dataset_refcocog#,train_referit,
+     train_dataset_coco,train_dataset_gref,train_dataset_zom,train_dataset_refcocoplus,train_dataset_refcocog#,train_referit,
     ])
     val_dataset = torch.utils.data.ConcatDataset([
         val_dataset_coco#val_dataset_gref#val_dataset_coco#val_dataset_zom#,val_referit,
@@ -412,6 +462,8 @@ def main():
     dist.destroy_process_group()
 
 if __name__ == '__main__':
+    import filelock
+    filelock.FileLock = filelock.SoftFileLock
     import torch.multiprocessing as mp
     mp.set_start_method('fork', force=True)
     main()
