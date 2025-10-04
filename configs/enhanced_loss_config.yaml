@@ -1,0 +1,23 @@
+# Enhanced Loss Configuration
+# 增强损失函数配置
+
+# Loss function flags - 损失函数开关
+use_focal: true          # 是否使用Focal Loss处理类别不平衡
+use_iou: true            # 是否使用IoU Loss提高分割精度
+use_boundary: true       # 是否使用边界损失提升边缘质量
+use_adaptive_weighting: true  # 是否使用自适应权重调整
+
+# Focal Loss parameters - Focal Loss参数
+focal_alpha: 0.25        # 正样本权重，0.25表示正样本权重较小
+focal_gamma: 2.0         # 聚焦参数，越大越关注难分类样本
+
+# Boundary Loss parameters - 边界损失参数
+boundary_kernel_size: 3  # 边界检测核大小
+
+# Adaptive weighting parameters - 自适应权重参数
+adaptive_init_weights: [1.0, 1.0, 1.0, 1.0, 1.0]  # [ce, dice, focal, iou, boundary]初始权重
+
+# Point sampling parameters (inherited from original) - 点采样参数
+num_points: 12544        # 112*112
+oversample_ratio: 3.0
+importance_sample_ratio: 0.75
