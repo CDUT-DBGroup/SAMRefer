@@ -5,7 +5,7 @@
 use_focal: true          # 是否使用Focal Loss处理类别不平衡
 use_iou: true            # 是否使用IoU Loss提高分割精度
 use_boundary: true       # 是否使用边界损失提升边缘质量
-use_adaptive_weighting: true  # 是否使用自适应权重调整
+use_adaptive_weighting: false  # 暂时禁用自适应权重调整（避免计算图问题）
 
 # Focal Loss parameters - Focal Loss参数
 focal_alpha: 0.25        # 正样本权重，0.25表示正样本权重较小
@@ -16,11 +16,11 @@ boundary_kernel_size: 3  # 边界检测核大小
 
 # Loss scaling factors - 损失缩放因子（用于平衡不同loss的数值范围）
 loss_scaling_factors:
-  ce: 1.0                # 交叉熵损失缩放因子
-  dice: 1.0              # Dice损失缩放因子
-  focal: 0.5             # Focal损失缩放因子（提高影响）
-  iou: 0.3               # IoU损失缩放因子（提高影响）
-  boundary: 0.2          # 边界损失缩放因子（提高影响）
+  ce: 2.0                # 交叉熵损失缩放因子（提高影响）
+  dice: 1.5              # Dice损失缩放因子（提高影响）
+  focal: 1.0             # Focal损失缩放因子
+  iou: 0.8               # IoU损失缩放因子（提高影响）
+  boundary: 0.5          # 边界损失缩放因子（提高影响）
 
 # Adaptive weighting parameters - 自适应权重参数
 adaptive_init_weights: [1.0, 1.0, 0.5, 0.3, 0.2]  # [ce, dice, focal, iou, boundary]初始权重
