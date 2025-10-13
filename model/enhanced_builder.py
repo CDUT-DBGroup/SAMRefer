@@ -97,10 +97,14 @@ def refersam_enhanced(pretrained=None, args=None, loss_config_path=None):
         use_iou=loss_config.get('use_iou', True),
         use_boundary=loss_config.get('use_boundary', True),
         use_adaptive_weighting=loss_config.get('use_adaptive_weighting', True),
+        use_curriculum_learning=loss_config.get('use_curriculum_learning', True),
+        use_dataset_aware_loss=loss_config.get('use_dataset_aware_loss', True),
         focal_alpha=loss_config.get('focal_alpha', 0.25),
         focal_gamma=loss_config.get('focal_gamma', 2.0),
         boundary_kernel_size=loss_config.get('boundary_kernel_size', 3),
-        loss_scaling_factors=loss_config.get('loss_scaling_factors', None)
+        loss_scaling_factors=loss_config.get('loss_scaling_factors', None),
+        curriculum_schedule=loss_config.get('curriculum_schedule', None),
+        dataset_weights=loss_config.get('dataset_weights', None)
     )
     
     return _segm_refersam_enhanced(pretrained, args, criterion)

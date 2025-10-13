@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced training script with improved loss functions
-使用增强损失函数的训练脚本
+Enhanced training script for multi-dataset training with improved loss functions
+使用增强损失函数的多数据集训练脚本
 """
 import filelock
 filelock.FileLock = filelock.SoftFileLock
@@ -65,7 +65,7 @@ def set_seed(seed=123456):
 def setup_logger(output_dir, rank=0):
     if rank != 0:
         return None
-    log_file = os.path.join(output_dir, f'enhanced_training_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+    log_file = os.path.join(output_dir, f'enhanced_multi_dataset_training_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -83,12 +83,24 @@ def count_parameters(model):
     return total_params, trainable_params
 
 
-def main():
-    # 解析命令行参数
-    # parser = argparse.ArgumentParser(description='Enhanced ReferSAM Training')
-    # parser = add_enhanced_loss_args(parser)
-    # args, unknown = parser.parse_known_args()
+class MultiDatasetWrapper:
+    """Wrapper to add dataset name to samples"""
+    def __init__(self, dataset, dataset_name):
+        self.dataset = dataset
+        self.dataset_name = dataset_name
     
+    def __len__(self):
+        return len(self.dataset)
+    
+    def __getitem__(self, idx):
+        sample, target = self.dataset[idx]
+        # Add dataset name to sample
+        if isinstance(sample, dict):
+            sample['dataset_name'] = self.dataset_name
+        return sample, target
+
+
+def main():
     # 初始化 DeepSpeed
     deepspeed.init_distributed()
     
@@ -116,7 +128,7 @@ def main():
     logger = setup_logger(args.output_dir, rank)
     
     if logger:
-        logger.info(f"Starting Enhanced DeepSpeed training: rank {rank}, world_size {world_size}")
+        logger.info(f"Starting Enhanced Multi-Dataset DeepSpeed training: rank {rank}, world_size {world_size}")
         logger.info(f"Enhanced loss enabled: {getattr(args, 'use_enhanced_loss', True)}")
         logger.info(f"Loss config path: {getattr(args, 'loss_config_path', 'None')}")
         logger.info(f"Loss ablation mode: {getattr(args, 'loss_ablation', 'all')}")
@@ -132,7 +144,7 @@ def main():
             loss_config_path=getattr(args, 'loss_config_path', None)
         )
         if logger:
-            logger.info("Using Enhanced Loss Functions: Focal + IoU + Boundary + Adaptive Weighting")
+            logger.info("Using Enhanced Loss Functions: Focal + IoU + Boundary + Adaptive Weighting + Curriculum Learning")
     else:
         model = refersam_original(pretrained=None, args=args)
         if logger:
@@ -156,21 +168,79 @@ def main():
             if param.dtype != torch.float32:
                 param.data = param.data.float()
 
-    # 创建数据集 (保持原有逻辑)
+    # 创建4个数据集
     if logger:
-        logger.info("Creating datasets...")
-    train_dataset_coco = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='train',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
+        logger.info("Creating multi-dataset...")
+    
+    # RefCOCO
+    train_dataset_coco = MultiDatasetWrapper(
+        ReferDataset(
+            refer_data_root=args.data_root,
+            dataset='refcoco',
+            splitBy='unc',
+            bert_tokenizer=args.tokenizer_type,
+            max_tokens=getattr(args, 'max_tokens', 30),
+            split='train',
+            eval_mode=False,
+            size=getattr(args, 'img_size', 320),
+            precision=args.precision
+        ), 'refcoco'
     )
     
+    # RefCOCO+
+    train_dataset_refcocoplus = MultiDatasetWrapper(
+        ReferDataset(
+            refer_data_root=args.data_root,
+            dataset='refcoco+',
+            splitBy='unc',
+            bert_tokenizer=args.tokenizer_type,
+            max_tokens=getattr(args, 'max_tokens', 30),
+            split='train',
+            eval_mode=False,
+            size=getattr(args, 'img_size', 320),
+            precision=args.precision
+        ), 'refcoco+'
+    )
+    
+    # RefCOCOg
+    train_dataset_refcocog = MultiDatasetWrapper(
+        ReferDataset(
+            refer_data_root=args.data_root,
+            dataset='refcocog',
+            splitBy='umd',
+            bert_tokenizer=args.tokenizer_type,
+            max_tokens=getattr(args, 'max_tokens', 30),
+            split='train',
+            eval_mode=False,
+            size=getattr(args, 'img_size', 320),
+            precision=args.precision
+        ), 'refcocog'
+    )
+    
+    # Ref-ZOM
+    train_dataset_zom = MultiDatasetWrapper(
+        ReferzomDataset(
+            refer_data_root=args.data_root,
+            dataset='ref-zom',
+            splitBy='final',
+            bert_tokenizer=args.tokenizer_type,
+            max_tokens=getattr(args, 'max_tokens', 30),
+            split='train',
+            eval_mode=False,
+            size=getattr(args, 'img_size', 320),
+            precision=args.precision
+        ), 'ref-zom'
+    )
+    
+    # 合并所有训练数据集
+    train_dataset = torch.utils.data.ConcatDataset([
+        train_dataset_coco,
+        train_dataset_refcocoplus, 
+        train_dataset_refcocog,
+        train_dataset_zom
+    ])
+    
+    # 验证数据集（使用RefCOCO）
     val_dataset_coco = ReferDataset(
         refer_data_root=args.data_root,
         dataset='refcoco',
@@ -182,12 +252,17 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    
-    train_dataset = torch.utils.data.ConcatDataset([train_dataset_coco])
     val_dataset = torch.utils.data.ConcatDataset([val_dataset_coco])
 
     if logger:
         logger.info("Creating data loaders...")
+        logger.info(f"Total training samples: {len(train_dataset)}")
+        logger.info(f"  - RefCOCO: {len(train_dataset_coco)}")
+        logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
+        logger.info(f"  - RefCOCOg: {len(train_dataset_refcocog)}")
+        logger.info(f"  - Ref-ZOM: {len(train_dataset_zom)}")
+        logger.info(f"Total validation samples: {len(val_dataset)}")
+    
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
     train_loader = DataLoader(
@@ -229,12 +304,12 @@ def main():
         config=ds_config
     )
 
-    # 训练循环 (保持原有逻辑，但添加增强损失的日志)
+    # 训练循环
     start_epoch = 0
     best_iou_miou_sum = 0
     
     if logger:
-        logger.info("Starting enhanced training...")
+        logger.info("Starting enhanced multi-dataset training...")
         
         # 打印loss配置信息
         if getattr(args, 'use_enhanced_loss', False):
@@ -253,6 +328,16 @@ def main():
                     init_weights = torch.exp(model_engine.module.criterion.adaptive_weighting.log_vars).detach().cpu().float().numpy()
                     logger.info(f"Initial adaptive weights: {init_weights}")
                     logger.info(f"Temperature: {model_engine.module.criterion.adaptive_weighting.temperature}")
+            
+            # 打印课程学习配置
+            if hasattr(model_engine.module, 'criterion') and hasattr(model_engine.module.criterion, 'curriculum_schedule'):
+                curriculum_schedule = model_engine.module.criterion.curriculum_schedule
+                logger.info(f"Curriculum schedule: {curriculum_schedule}")
+            
+            # 打印数据集权重配置
+            if hasattr(model_engine.module, 'criterion') and hasattr(model_engine.module.criterion, 'dataset_weights'):
+                dataset_weights = model_engine.module.criterion.dataset_weights
+                logger.info(f"Dataset weights: {dataset_weights}")
             
             logger.info("=" * 40)
     
@@ -277,9 +362,10 @@ def main():
             total_boundary_loss = 0
             total_curriculum_info = {}
             total_dataset_weights = {}
+            dataset_loss_stats = {}
         
         if logger:
-            pbar = tqdm(train_loader, disable=not sys.stdout.isatty(), desc=f'Enhanced Epoch {epoch+1}/{args.epochs}')
+            pbar = tqdm(train_loader, disable=not sys.stdout.isatty(), desc=f'Enhanced Multi-Dataset Epoch {epoch+1}/{args.epochs}')
         else:
             pbar = train_loader
             
@@ -297,61 +383,84 @@ def main():
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)
             orig_size = samples['orig_size']
             
+            # 获取数据集名称
+            dataset_name = samples.get('dataset_name', 'unknown')
+            # 修复：如果dataset_name是列表，取第一个元素
+            if isinstance(dataset_name, list):
+                dataset_name = dataset_name[0] if dataset_name else 'unknown'
+            
             if target.sum() < 10:
                 if logger:
                     logger.warning("Skipping sample with empty/too small mask")
                 continue
 
             # 前向传播
-            # 尝试获取数据集名称（如果可用）
-            dataset_name = None
-            if hasattr(samples, 'dataset_name'):
-                dataset_name = samples['dataset_name']
-            elif 'dataset_name' in samples:
-                dataset_name = samples['dataset_name']
-            
             loss_dict = model_engine(img, word_ids, word_masks, target)
             loss = loss_dict['total_loss']
+            
+            # 确保loss是标量张量
+            if not loss.requires_grad:
+                continue
                 
             # 检查损失值
             if torch.isnan(loss) or torch.isinf(loss):
                 if logger:
                     logger.error(f"NaN/Inf loss detected: {loss.item()}")
                 continue
+            
+            # 在backward之前提取所有需要的损失值
+            loss_item = loss.item()
+            mask_loss_item = loss_dict['loss_mask'].item()
+            dice_loss_item = loss_dict['loss_dice'].item()
+            
+            # 提取增强损失值（如果存在）
+            focal_loss_item = loss_dict.get('loss_focal', torch.tensor(0.0)).item() if 'loss_focal' in loss_dict else 0.0
+            iou_loss_item = loss_dict.get('loss_iou', torch.tensor(0.0)).item() if 'loss_iou' in loss_dict else 0.0
+            boundary_loss_item = loss_dict.get('loss_boundary', torch.tensor(0.0)).item() if 'loss_boundary' in loss_dict else 0.0
+            
+            # 提取课程学习和数据集权重信息（如果存在）
+            curriculum_weights = loss_dict.get('curriculum_weights', {})
+            dataset_weight = loss_dict.get('dataset_weight', 1.0)
                 
             # DeepSpeed 反向传播和优化器步骤
+            # 确保loss是标量且不保留计算图
+            if loss.dim() > 0:
+                loss = loss.mean()
             model_engine.backward(loss)
             model_engine.step()
             
-            # 统计损失
-            total_loss += loss.item()
-            total_mask_loss += loss_dict['loss_mask'].item()
-            total_dice_loss += loss_dict['loss_dice'].item()
+            # 统计损失（使用预先提取的值）
+            total_loss += loss_item
+            total_mask_loss += mask_loss_item
+            total_dice_loss += dice_loss_item
+            
+            # 按数据集统计损失
+            if dataset_name not in dataset_loss_stats:
+                dataset_loss_stats[dataset_name] = {
+                    'total_loss': 0, 'count': 0,
+                    'mask_loss': 0, 'dice_loss': 0
+                }
+            dataset_loss_stats[dataset_name]['total_loss'] += loss_item
+            dataset_loss_stats[dataset_name]['count'] += 1
+            dataset_loss_stats[dataset_name]['mask_loss'] += mask_loss_item
+            dataset_loss_stats[dataset_name]['dice_loss'] += dice_loss_item
             
             # 增强损失统计
             if getattr(args, 'use_enhanced_loss', False):
-                if 'loss_focal' in loss_dict:
-                    total_focal_loss += loss_dict['loss_focal'].item()
-                if 'loss_iou' in loss_dict:
-                    total_iou_loss += loss_dict['loss_iou'].item()
-                if 'loss_boundary' in loss_dict:
-                    total_boundary_loss += loss_dict['loss_boundary'].item()
+                total_focal_loss += focal_loss_item
+                total_iou_loss += iou_loss_item
+                total_boundary_loss += boundary_loss_item
                 
                 # 统计课程学习信息
-                if 'curriculum_weights' in loss_dict:
-                    curriculum_weights = loss_dict['curriculum_weights']
-                    for key, value in curriculum_weights.items():
-                        if key not in total_curriculum_info:
-                            total_curriculum_info[key] = 0
-                        total_curriculum_info[key] += value
+                for key, value in curriculum_weights.items():
+                    if key not in total_curriculum_info:
+                        total_curriculum_info[key] = 0
+                    total_curriculum_info[key] += value
                 
                 # 统计数据集权重信息
-                if 'dataset_weight' in loss_dict:
-                    dataset_weight = loss_dict['dataset_weight']
-                    if dataset_name:
-                        if dataset_name not in total_dataset_weights:
-                            total_dataset_weights[dataset_name] = []
-                        total_dataset_weights[dataset_name].append(dataset_weight)
+                if dataset_name not in total_dataset_weights:
+                    total_dataset_weights[dataset_name] = []
+                total_dataset_weights[dataset_name].append(dataset_weight)
             
             # 更新进度条
             current_loss = total_loss / (batch_idx + 1)
@@ -365,79 +474,39 @@ def main():
             }
             
             if getattr(args, 'use_enhanced_loss', False):
-                if 'loss_focal' in loss_dict:
+                if focal_loss_item > 0:
                     postfix_dict['focal_loss'] = total_focal_loss / (batch_idx + 1)
-                if 'loss_iou' in loss_dict:
+                if iou_loss_item > 0:
                     postfix_dict['iou_loss'] = total_iou_loss / (batch_idx + 1)
-                if 'loss_boundary' in loss_dict:
+                if boundary_loss_item > 0:
                     postfix_dict['boundary_loss'] = total_boundary_loss / (batch_idx + 1)
             
             if logger:
                 pbar.set_postfix(postfix_dict)
-                if (batch_idx + 1) % 10 == 0:
+                if (batch_idx + 1) % 20 == 0:
                     # 详细的loss打印
-                    log_msg = f"Enhanced Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
+                    log_msg = f"Enhanced Multi-Dataset Epoch {epoch+1}/{args.epochs} - Batch {batch_idx+1}/{len(train_loader)} - "
                     log_msg += f"Total Loss: {current_loss:.4f} - Mask Loss: {current_mask_loss:.4f} - Dice Loss: {current_dice_loss:.4f}"
                     
                     # 添加增强loss组件
                     if getattr(args, 'use_enhanced_loss', False):
-                        if 'loss_focal' in loss_dict:
+                        if focal_loss_item > 0:
                             current_focal = total_focal_loss / (batch_idx + 1)
                             log_msg += f" - Focal Loss: {current_focal:.4f}"
-                        if 'loss_iou' in loss_dict:
+                        if iou_loss_item > 0:
                             current_iou = total_iou_loss / (batch_idx + 1)
                             log_msg += f" - IoU Loss: {current_iou:.4f}"
-                        if 'loss_boundary' in loss_dict:
+                        if boundary_loss_item > 0:
                             current_boundary = total_boundary_loss / (batch_idx + 1)
                             log_msg += f" - Boundary Loss: {current_boundary:.4f}"
                         
                         # 打印课程学习权重
-                        if 'curriculum_weights' in loss_dict:
-                            curriculum_weights = loss_dict['curriculum_weights']
+                        if curriculum_weights:
                             log_msg += f" - Curriculum: {curriculum_weights}"
                         
                         # 打印数据集权重
-                        if 'dataset_weight' in loss_dict and dataset_name:
-                            log_msg += f" - Dataset({dataset_name}): {loss_dict['dataset_weight']:.3f}"
-                        
-                        # 打印当前batch的loss权重（如果可用）
-                        if 'loss_weights' in loss_dict:
-                            weights = loss_dict['loss_weights']
-                            if isinstance(weights, torch.Tensor):
-                                weights_list = weights.detach().cpu().float().numpy()
-                                log_msg += f" - Weights: {weights_list}"
-                        
-                        # 每50个batch打印一次详细的权重变化
-                        if (batch_idx + 1) % 50 == 0 and 'loss_weights' in loss_dict:
-                            weights = loss_dict['loss_weights']
-                            if isinstance(weights, torch.Tensor):
-                                weights_list = weights.detach().cpu().float().numpy()
-                                logger.info(f"  Current Loss Weights: {weights_list}")
-                                logger.info(f"  Weight Sum: {weights_list.sum():.4f}")
-                            
-                            # 打印课程学习进度
-                            if 'curriculum_weights' in loss_dict:
-                                curriculum_weights = loss_dict['curriculum_weights']
-                                logger.info(f"  Curriculum Progress: {curriculum_weights}")
-                            
-                            # 打印数据集权重统计
-                            if total_dataset_weights:
-                                logger.info(f"  Dataset Weight Stats:")
-                                for ds_name, weights_list in total_dataset_weights.items():
-                                    avg_weight = sum(weights_list) / len(weights_list)
-                                    logger.info(f"    {ds_name}: {avg_weight:.3f} (samples: {len(weights_list)})")
-                    
-                    # 打印当前batch的各个loss数值
-                    log_msg += f"\n  Current Batch Losses:"
-                    log_msg += f" Total: {loss.item():.4f}, Mask: {loss_dict['loss_mask'].item():.4f}, Dice: {loss_dict['loss_dice'].item():.4f}"
-                    
-                    if getattr(args, 'use_enhanced_loss', False):
-                        if 'loss_focal' in loss_dict:
-                            log_msg += f", Focal: {loss_dict['loss_focal'].item():.4f}"
-                        if 'loss_iou' in loss_dict:
-                            log_msg += f", IoU: {loss_dict['loss_iou'].item():.4f}"
-                        if 'loss_boundary' in loss_dict:
-                            log_msg += f", Boundary: {loss_dict['loss_boundary'].item():.4f}"
+                        if dataset_name:
+                            log_msg += f" - Dataset({dataset_name}): {dataset_weight:.3f}"
                     
                     logger.info(log_msg)
 
@@ -447,10 +516,19 @@ def main():
             avg_mask_loss = total_mask_loss / len(train_loader)
             avg_dice_loss = total_dice_loss / len(train_loader)
             
-            logger.info(f"\n=== Enhanced Epoch {epoch+1} Loss Summary ===")
+            logger.info(f"\n=== Enhanced Multi-Dataset Epoch {epoch+1} Loss Summary ===")
             logger.info(f"Average Total Loss: {avg_loss:.4f}")
             logger.info(f"Average Mask Loss: {avg_mask_loss:.4f}")
             logger.info(f"Average Dice Loss: {avg_dice_loss:.4f}")
+            
+            # 按数据集统计
+            logger.info("Dataset-wise Loss Statistics:")
+            for ds_name, stats in dataset_loss_stats.items():
+                if stats['count'] > 0:
+                    avg_ds_loss = stats['total_loss'] / stats['count']
+                    avg_ds_mask = stats['mask_loss'] / stats['count']
+                    avg_ds_dice = stats['dice_loss'] / stats['count']
+                    logger.info(f"  {ds_name}: Total={avg_ds_loss:.4f}, Mask={avg_ds_mask:.4f}, Dice={avg_ds_dice:.4f} (samples: {stats['count']})")
             
             if getattr(args, 'use_enhanced_loss', False):
                 if 'loss_focal' in loss_dict:
@@ -479,17 +557,17 @@ def main():
             
             logger.info("=" * 50)
 
-        # 验证和保存 (保持原有逻辑)
+        # 验证和保存
         save_best = False
         metrics = None
 
         if rank == 0:
-            logger.info(f"\nValidating enhanced epoch {epoch+1}...")
+            logger.info(f"\nValidating enhanced multi-dataset epoch {epoch+1}...")
             model_engine.eval()
             metrics = validate(model_engine.module, val_loader, device, use_fp16, use_bf16)
             model_engine.train()
             
-            logger.info(f"Enhanced validation metrics for epoch {epoch+1}:")
+            logger.info(f"Enhanced multi-dataset validation metrics for epoch {epoch+1}:")
             logger.info(f"mIoU: {metrics['mIoU']:.4f}")
             logger.info(f"oIoU: {metrics['oIoU']:.4f}")
             logger.info(f"gIoU: {metrics['gIoU']:.4f}")
@@ -532,7 +610,7 @@ def main():
 
         # 保存模型
         if save_best:
-            best_path = os.path.join(args.output_dir, 'enhanced_best_iou_miou_model')
+            best_path = os.path.join(args.output_dir, 'enhanced_multi_dataset_best_iou_miou_model')
             if rank == 0:
                 os.makedirs(args.output_dir, exist_ok=True)
                 if os.path.exists(best_path):
@@ -541,19 +619,19 @@ def main():
             dist.barrier()
             model_engine.save_checkpoint(best_path, client_state=client_state)
             if rank == 0:
-                logger.info(f"Saved new enhanced best iou+miou model with score: {best_iou_miou_sum:.4f}")
+                logger.info(f"Saved new enhanced multi-dataset best iou+miou model with score: {best_iou_miou_sum:.4f}")
 
         # 保存当前 epoch 的 checkpoint
-        current_checkpoint = os.path.join(args.output_dir, f'enhanced_checkpoint_epoch_{epoch+1}')
+        current_checkpoint = os.path.join(args.output_dir, f'enhanced_multi_dataset_checkpoint_epoch_{epoch+1}')
         if rank == 0:
             os.makedirs(args.output_dir, exist_ok=True)
         dist.barrier()
         model_engine.save_checkpoint(current_checkpoint, client_state=client_state)
         if rank == 0:
-            logger.info(f"Saved enhanced checkpoint for epoch {epoch+1}")
+            logger.info(f"Saved enhanced multi-dataset checkpoint for epoch {epoch+1}")
 
         # 删除上一个 checkpoint
-        prev_checkpoint = os.path.join(args.output_dir, f'enhanced_checkpoint_epoch_{epoch}')
+        prev_checkpoint = os.path.join(args.output_dir, f'enhanced_multi_dataset_checkpoint_epoch_{epoch}')
         if rank == 0 and os.path.exists(prev_checkpoint):
             shutil.rmtree(prev_checkpoint)
         dist.barrier()
@@ -565,4 +643,3 @@ if __name__ == '__main__':
     import torch.multiprocessing as mp
     mp.set_start_method('fork', force=True)
     main()
-

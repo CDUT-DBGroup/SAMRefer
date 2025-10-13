@@ -13,6 +13,7 @@ export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
 source ~/anaconda3/etc/profile.d/conda.sh
 # source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ovseg_lower_pytorch
+# conda activate SAM
 
 # 设置随机种子
 export PYTHONHASHSEED=123456
@@ -23,6 +24,7 @@ export FILELOCK_DEFAULT_CLASS=SoftFileLock
 export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 
 nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_loss.py \
+# nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/student.yaml \
     --use_enhanced_loss \
