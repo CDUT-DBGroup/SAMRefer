@@ -152,19 +152,21 @@ class AdaptiveLossWeighting(nn.Module):
         # 归一化权重，但保持相对比例
         weights = raw_weights / raw_weights.sum() * len(raw_weights)
         
-        # 应用动量平滑
+        # 应用动量平滑（不参与计算图，避免跨迭代保留图）
         if self.training:
-            self.running_weights = self.momentum * self.running_weights + (1 - self.momentum) * weights
+            with torch.no_grad():
+                self.running_weights = self.momentum * self.running_weights + (1 - self.momentum) * weights
         
-        # 使用平滑后的权重
-        smooth_weights = self.running_weights if self.training else weights
+        # 用于真正参与反传的权重：即时 weights（允许对 log_vars 求梯度）
+        effective_weights = weights
         
-        # 计算加权loss - 使用简单的加权求和避免计算图问题
+        # 计算加权loss（保持计算图仅与 effective_weights 和 losses 相连）
         weighted_loss = torch.zeros_like(losses[0])
-        for w, loss in zip(smooth_weights, losses):
+        for w, loss in zip(effective_weights, losses):
             weighted_loss = weighted_loss + w * loss
         
-        return weighted_loss, smooth_weights
+        # 返回用于监控的权重时，使用 detach 避免日志长期持有图
+        return weighted_loss, weights.detach()
 
 
 class EnhancedSegMaskLoss(nn.Module):
@@ -364,9 +366,9 @@ class EnhancedSegMaskLoss(nn.Module):
                 aux_total, aux_weights = self._compute_adaptive_total_loss(aux_base)
                 total_loss = total_loss + aux_total
                 # store aux weights for monitoring (optional)
-                loss_dict['adaptive_weights_aux'] = aux_weights.detach()
+                loss_dict['adaptive_weights_aux'] = aux_weights  # already detached in module
             # store main weights for monitoring
-            loss_dict['adaptive_weights_main'] = main_weights.detach()
+            loss_dict['adaptive_weights_main'] = main_weights  # already detached in module
             loss_dict['total_loss'] = total_loss
         else:
             # Fallback: simple sum of all components
