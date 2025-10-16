@@ -58,35 +58,62 @@ def iou_loss(inputs, targets, smooth=1e-6):
     return (1 - iou).mean()
 
 
-def boundary_loss(inputs, targets, kernel_size=3):
+def boundary_loss(inputs, targets, kernel_size=3, sdf_k=3.0):
     """
-    Boundary Loss for improving edge quality
+    SDF-weighted boundary loss computed on a narrow band around object boundaries.
     Args:
-        inputs: A float tensor of shape [B, H, W] (logits)
-        targets: A float tensor of shape [B, H, W]
-        kernel_size: Size of the kernel for boundary detection
+        inputs: [B, H, W] logits
+        targets: [B, H, W] binary masks in {0,1}
+        kernel_size: integer band width T (in pixels) around boundary (3~10 reasonable)
+        sdf_k: normalization factor for tanh(sdf / sdf_k)
     """
-    inputs = torch.sigmoid(inputs)
-    
-    # Convert to binary masks
-    pred_binary = (inputs > 0.5).float()
+    # Use probability instead of raw logits
+    pred_prob = torch.sigmoid(inputs)
     target_binary = (targets > 0.5).float()
-    
-    # Create boundary detection kernel
-    kernel = torch.ones(1, 1, kernel_size, kernel_size, device=inputs.device)
-    kernel[0, 0, kernel_size//2, kernel_size//2] = 0
-    
-    # Detect boundaries using morphological operations
-    pred_boundary = F.conv2d(pred_binary.unsqueeze(1), kernel, padding=kernel_size//2)
-    pred_boundary = (pred_boundary > 0).float().squeeze(1)
-    
-    target_boundary = F.conv2d(target_binary.unsqueeze(1), kernel, padding=kernel_size//2)
-    target_boundary = (target_boundary > 0).float().squeeze(1)
-    
-    # Compute boundary loss
-    boundary_loss = F.binary_cross_entropy(pred_boundary, target_boundary)
-    
-    return boundary_loss
+
+    B, H, W = target_binary.shape
+    device = target_binary.device
+    T = int(max(1, kernel_size))
+
+    # Helper: limited-distance transform via iterative dilations (Chebyshev-like)
+    def limited_distance_to_mask(mask: torch.Tensor, max_d: int) -> torch.Tensor:
+        # mask: [B, H, W] in {0,1}
+        covered = (mask > 0.5)
+        dist = torch.full_like(mask, fill_value=float(max_d + 1))
+        dist = torch.where(covered, torch.zeros_like(dist), dist)
+        cur = covered
+        for d in range(1, max_d + 1):
+            cur = F.max_pool2d(cur.float().unsqueeze(1), kernel_size=3, stride=1, padding=1).squeeze(1) > 0
+            newly = (~covered) & cur
+            if newly.any():
+                dist = torch.where(newly, torch.full_like(dist, float(d)), dist)
+            covered = covered | cur
+        return dist
+
+    # Unsigned distances limited to band T (approximate)
+    fg = target_binary
+    bg = 1.0 - target_binary
+    outside_dist = limited_distance_to_mask(fg, T)  # distance from background to nearest foreground
+    inside_dist = limited_distance_to_mask(bg, T)    # distance from foreground to nearest background
+
+    # Signed distance: positive inside object, negative outside
+    sdf = torch.where(fg > 0.5, inside_dist, -outside_dist)
+
+    # Narrow band mask |sdf| <= T
+    band_mask = (sdf.abs() <= T).float()
+
+    # Normalize/scale SDF to avoid large magnitude domination
+    sdf_norm = torch.tanh(sdf / float(sdf_k))
+    # Weight emphasizing boundary (|sdf| small -> weight high)
+    weight = 1.0 - sdf_norm.abs()
+    weight = weight * band_mask
+
+    # Weighted BCE on probability
+    bce = F.binary_cross_entropy(pred_prob, target_binary, reduction='none')
+    weighted = bce * weight
+    denom = weight.sum(dim=(1, 2)).clamp(min=1.0)
+    loss_per_sample = weighted.sum(dim=(1, 2)) / denom
+    return loss_per_sample.mean()
 
 
 class AdaptiveLossWeighting(nn.Module):
