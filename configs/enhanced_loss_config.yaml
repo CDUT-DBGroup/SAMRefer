@@ -5,7 +5,7 @@
 use_focal: true          # 是否使用Focal Loss处理类别不平衡
 use_iou: true            # 是否使用IoU Loss提高分割精度
 use_boundary: true       # 是否使用边界损失提升边缘质量
-use_adaptive_weighting: false  # 暂时禁用自适应权重调整（避免计算图问题）
+use_adaptive_weighting: true   # 启用自适应权重调整
 
 # Focal Loss parameters - Focal Loss参数
 focal_alpha: 0.25        # 正样本权重，0.25表示正样本权重较小

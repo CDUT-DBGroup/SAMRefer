@@ -321,12 +321,33 @@ class EnhancedSegMaskLoss(nn.Module):
             aux_losses = {k + "_aux": v * dataset_weight for k, v in aux_losses.items()}
             loss_dict.update(aux_losses)
         
-        # Compute total loss - 暂时禁用自适应权重以避免计算图问题
-        total_loss = 0
-        for k, v in loss_dict.items():
-            if k != 'total_loss':
-                total_loss += v
-        loss_dict['total_loss'] = total_loss
+        # Compute total loss (support adaptive weighting with scaling factors)
+        if self.use_adaptive_weighting:
+            # main branch adaptive total
+            main_loss_dict = {k: v for k, v in loss_dict.items() if k.startswith('loss_') and not k.endswith('_aux')}
+            main_total, main_weights = self._compute_adaptive_total_loss(main_loss_dict)
+            total_loss = main_total
+            # aux branch adaptive total (if exists)
+            aux_keys = [k for k in loss_dict.keys() if k.endswith('_aux')]
+            if len(aux_keys) > 0:
+                aux_base = {}
+                for k in aux_keys:
+                    base_k = k.replace('_aux', '')
+                    aux_base[base_k] = loss_dict[k]
+                aux_total, aux_weights = self._compute_adaptive_total_loss(aux_base)
+                total_loss = total_loss + aux_total
+                # store aux weights for monitoring (optional)
+                loss_dict['adaptive_weights_aux'] = aux_weights.detach()
+            # store main weights for monitoring
+            loss_dict['adaptive_weights_main'] = main_weights.detach()
+            loss_dict['total_loss'] = total_loss
+        else:
+            # Fallback: simple sum of all components
+            total_loss = 0
+            for k, v in loss_dict.items():
+                if k != 'total_loss':
+                    total_loss += v
+            loss_dict['total_loss'] = total_loss
         
         # Add curriculum and dataset info for monitoring
         loss_dict['curriculum_weights'] = curriculum_weights
