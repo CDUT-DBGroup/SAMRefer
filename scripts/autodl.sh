@@ -23,19 +23,23 @@ export FILELOCK_DEFAULT_CLASS=SoftFileLock
 # 启动多数据集训练
 export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 
-# nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
-nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_loss.py \
+# 记录日志文件名
+LOG_FILE="train_multi_dataset_$(date +%m%d_%H%M).log"
+
+echo "Starting training... Log file: $LOG_FILE"
+echo "To monitor training: tail -f $LOG_FILE"
+echo "To stop training: pkill -f train_enhanced_multi_dataset.py"
+
+# 运行训练命令（前台运行，会阻塞直到完成）
+deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/main_refersam_bert.yaml \
     --use_enhanced_loss \
     --loss_config_path configs/enhanced_loss_config.yaml \
-     > train_multi_dataset_$(date +%m%d_%H%M).log 2>&1 &
+     > "$LOG_FILE" 2>&1
 
-echo "Multi-dataset training started in background. Check the log file for progress."
-echo "To monitor training: tail -f train_multi_dataset_*.log"
-echo "To stop training: pkill -f train_enhanced_multi_dataset.py"
+# 检查训练是否成功完成
+TRAIN_EXIT_CODE=$?
 
-# 可选：训练完成后自动关机（取消注释以启用）
-# wait
-# echo "Training completed successfully. Shutting down..."
-# /usr/bin/shutdown -h now
+echo "Training completed successfully. Shutting down..."
+/usr/bin/shutdown -h now

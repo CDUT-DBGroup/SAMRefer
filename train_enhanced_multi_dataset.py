@@ -187,57 +187,57 @@ def main():
         ), 'refcoco'
     )
     
-    # RefCOCO+
-    train_dataset_refcocoplus = MultiDatasetWrapper(
-        ReferDataset(
-            refer_data_root=args.data_root,
-            dataset='refcoco+',
-            splitBy='unc',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'refcoco+'
-    )
+    # # RefCOCO+
+    # train_dataset_refcocoplus = MultiDatasetWrapper(
+    #     ReferDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='refcoco+',
+    #         splitBy='unc',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'refcoco+'
+    # )
     
-    # RefCOCOg
-    train_dataset_refcocog = MultiDatasetWrapper(
-        ReferDataset(
-            refer_data_root=args.data_root,
-            dataset='refcocog',
-            splitBy='umd',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'refcocog'
-    )
+    # # RefCOCOg
+    # train_dataset_refcocog = MultiDatasetWrapper(
+    #     ReferDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='refcocog',
+    #         splitBy='umd',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'refcocog'
+    # )
     
-    # Ref-ZOM
-    train_dataset_zom = MultiDatasetWrapper(
-        ReferzomDataset(
-            refer_data_root=args.data_root,
-            dataset='ref-zom',
-            splitBy='final',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'ref-zom'
-    )
+    # # Ref-ZOM
+    # train_dataset_zom = MultiDatasetWrapper(
+    #     ReferzomDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='ref-zom',
+    #         splitBy='final',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'ref-zom'
+    # )
     
     # 合并所有训练数据集
     train_dataset = torch.utils.data.ConcatDataset([
         train_dataset_coco,
-        train_dataset_refcocoplus, 
-        train_dataset_refcocog,
-        train_dataset_zom
+        # train_dataset_refcocoplus, 
+        # train_dataset_refcocog,
+        # train_dataset_zom
     ])
     
     # 验证数据集（使用RefCOCO）
@@ -258,9 +258,9 @@ def main():
         logger.info("Creating data loaders...")
         logger.info(f"Total training samples: {len(train_dataset)}")
         logger.info(f"  - RefCOCO: {len(train_dataset_coco)}")
-        logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
-        logger.info(f"  - RefCOCOg: {len(train_dataset_refcocog)}")
-        logger.info(f"  - Ref-ZOM: {len(train_dataset_zom)}")
+        # logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
+        # logger.info(f"  - RefCOCOg: {len(train_dataset_refcocog)}")
+        # logger.info(f"  - Ref-ZOM: {len(train_dataset_zom)}")
         logger.info(f"Total validation samples: {len(val_dataset)}")
     
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
@@ -304,9 +304,36 @@ def main():
         config=ds_config
     )
 
-    # 训练循环
+        # resume support
     start_epoch = 0
     best_iou_miou_sum = 0
+    if rank == 0 and hasattr(args, 'resume') and args.resume:
+        import glob
+        resume_path = args.resume
+        # 如果 resume_path 是 best_iou_miou_model 目录，自动查找 global_step 子目录
+        if os.path.isdir(resume_path):
+            # 查找所有 global_step 子目录
+            subdirs = glob.glob(os.path.join(resume_path, "global_step*"))
+            if subdirs:
+                # 取最新的 global_step 子目录
+                latest_subdir = max(subdirs, key=os.path.getmtime)
+                logger.info(f"Resuming from checkpoint: {latest_subdir}")
+            else:
+                logger.info(f"Resuming from checkpoint: {resume_path}")
+        else:
+            logger.info(f"Resuming from checkpoint: {resume_path}")
+        # 实际上 load_checkpoint 只需要传父目录，deepspeed 会自动找最新 global_step
+        _, client_state = model_engine.load_checkpoint(resume_path)
+        start_epoch = client_state.get('epoch', 0)
+        best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
+        logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
+    # broadcast resume info to all ranks
+    start_epoch_tensor = torch.tensor([start_epoch], dtype=torch.int, device=device)
+    best_iou_miou_sum_tensor = torch.tensor([best_iou_miou_sum], dtype=torch.float, device=device)
+    dist.broadcast(start_epoch_tensor, src=0)
+    dist.broadcast(best_iou_miou_sum_tensor, src=0)
+    start_epoch = int(start_epoch_tensor.item())
+    best_iou_miou_sum = float(best_iou_miou_sum_tensor.item())
     
     if logger:
         logger.info("Starting enhanced multi-dataset training...")

@@ -1,4 +1,4 @@
-batch_size: 16
+batch_size: 32
 epochs: 30
 lr: 2e-5
 weight_decay: 0.01
@@ -21,8 +21,5 @@ clip_path: null
 precision: fp32
 # use_vl_adapter: False 给我自己写的模型使用的
 
-# pre_train_path: /root/autodl-tmp/vision_paper/ReferSAM/output/weights/best_iou_miou_model.pt
-# pre_train_path: /root/autodl-tmp/vision_paper/ReferSAM/output/refersam_bert/best_iou_miou_model.pt
-# pre_train_path: /root/autodl-tmp/vision_paper/ReferSAM/output/refersam_bert/contrastive_epoch_1.pt
 # pre_train_path: /root/autodl-tmp/vision_paper/ReferSAM/output/refersam_bert/checkpoint_epoch_1
-# resume: /root/autodl-tmp/vision_paper/ReferSAM/output/refersam_bert/checkpoint_epoch_13
+resume: /root/autodl-tmp/vision_paper/ReferSAM/output/refersam_bert/enhanced_multi_dataset_checkpoint_epoch_10
