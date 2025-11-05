@@ -231,13 +231,27 @@ def main():
             precision=args.precision
         ), 'ref-zom'
     )
-    
+
+    train_dataset_gref = MultiDatasetWrapper(
+        GRefDataset(
+            refer_data_root=args.data_root,
+            dataset='grefcoco',
+            splitBy='unc',
+            bert_tokenizer=args.tokenizer_type,
+            max_tokens=getattr(args, 'max_tokens', 30),
+            split='train',
+            eval_mode=False,
+            size=getattr(args, 'img_size', 320),
+            precision=args.precision
+        ), 'grefcoco'
+    )
     # 合并所有训练数据集
     train_dataset = torch.utils.data.ConcatDataset([
         train_dataset_coco,
         train_dataset_refcocoplus, 
         train_dataset_refcocog,
-        train_dataset_zom
+        train_dataset_zom,
+        train_dataset_gref
     ])
     
     # 验证数据集（使用RefCOCO）
@@ -670,3 +684,4 @@ if __name__ == '__main__':
     import torch.multiprocessing as mp
     mp.set_start_method('fork', force=True)
     main()
+    evaluate_four_datasets()
