@@ -31,6 +31,7 @@ echo "To monitor training: tail -f $LOG_FILE"
 echo "To stop training: pkill -f train_enhanced_multi_dataset.py"
 
 # 运行训练命令（前台运行，会阻塞直到完成）
+# 无论训练成功或失败，完成后都会自动关机
 deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/main_refersam_bert.yaml \
@@ -38,8 +39,6 @@ deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --loss_config_path configs/enhanced_loss_config.yaml \
      > "$LOG_FILE" 2>&1
 
-# 检查训练是否成功完成
-TRAIN_EXIT_CODE=$?
-
-echo "Training completed successfully. Shutting down..."
+# 训练结束（无论成功或失败），执行关机
+echo "Training finished. Shutting down..."
 /usr/bin/shutdown -h now
