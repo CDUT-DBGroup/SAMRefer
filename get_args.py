@@ -29,6 +29,8 @@ def get_args():
                        help='Path to loss configuration file')
     parser.add_argument('--loss_ablation', type=str, choices=['all', 'focal', 'iou', 'boundary', 'adaptive'], 
                        default='all', help='Loss ablation study mode')
+    parser.add_argument('--use_negative_masks', action='store_true',
+                       help='Use negative mask selection and adaptive fusion (BMS method)')
     # Step 4: 解析所有参数（命令行优先）
     args = parser.parse_args()
     return args

@@ -95,7 +95,7 @@ def calculate_point_metric(pred_mask, target_mask, num_points=100):
 #     return correct.item()
 
 # 这个是我新加的，不一定稳定可用，需要测试
-def validate(model, val_loader, device, use_fp16=False, use_bf16=False):
+def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_negative_masks=False):
     model.eval()
 
     total_intersection = 0.0
@@ -122,7 +122,7 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False):
             word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)  # [B,H,W]
 
-            pred_masks = model(img, word_ids, word_masks)
+            pred_masks = model(img, word_ids, word_masks, use_negative_masks=use_negative_masks)
             if pred_masks.ndim == 4:
                 pred_masks = pred_masks.squeeze(1)
 

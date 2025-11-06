@@ -148,7 +148,8 @@ def evaluate_refzom():
 
     # 验证
     logger.info("开始验证...")
-    metrics = validate(model_engine.module, val_loader, device, use_fp16, use_bf16)
+    use_negative_masks = getattr(args, 'use_negative_masks', False)
+    metrics = validate(model_engine.module, val_loader, device, use_fp16, use_bf16, use_negative_masks=use_negative_masks)
     logger.info("\n验证结果:")
     logger.info(f"mIoU: {metrics['mIoU']:.4f}")
     logger.info(f"oIoU: {metrics['oIoU']:.4f}")

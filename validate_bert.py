@@ -307,8 +307,10 @@ def evaluate_four_datasets():
             num_workers=0,
             pin_memory=True
         )
-        metrics = validate(model, val_loader, device)
-        logger.info(f"\nValidation Results for {name}:")
+        # 支持通过args传递use_negative_masks参数
+        use_negative_masks = getattr(args, 'use_negative_masks', False)
+        metrics = validate(model, val_loader, device, use_negative_masks=use_negative_masks)
+        logger.info(f"\nValidation Results for {name} (use_negative_masks={use_negative_masks}):")
         logger.info(f"mIoU: {metrics['mIoU']:.4f}")
         logger.info(f"oIoU: {metrics['oIoU']:.4f}")
         logger.info(f"gIoU: {metrics['gIoU']:.4f}")
