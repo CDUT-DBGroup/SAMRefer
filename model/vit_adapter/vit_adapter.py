@@ -169,7 +169,8 @@ class ViTAdapter(nn.Module):
         else:
             lang_g = lang_feats[:, 0].unsqueeze(1) # [B, 1, C], [CLS] embeddings
 
-        dense_prompts = lang_g.clone().detach()
+        # dense_prompts = lang_g.clone().detach()
+        dense_prompts = lang_g.clone()
         sparse_prompts = self.sparse_prompts.weight.unsqueeze(0).expand(bs, -1, -1) # [B, P, C]
         prompt_pos = self.prompt_pos.weight.unsqueeze(0).expand(bs, -1, -1) # [B, 1+P, C]
         all_prompts = torch.cat([dense_prompts, sparse_prompts], dim=1)
