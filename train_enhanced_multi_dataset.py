@@ -683,5 +683,5 @@ def main():
 if __name__ == '__main__':
     import torch.multiprocessing as mp
     mp.set_start_method('fork', force=True)
-    main()
+    # main()
     evaluate_four_datasets()

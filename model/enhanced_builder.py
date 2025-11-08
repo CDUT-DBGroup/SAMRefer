@@ -50,7 +50,7 @@ def _segm_refersam_enhanced(pretrained, args, criterion):
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     
-    if pretrained is not None:
+    if pretrained is True:
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
         print(f"Loading model weights from {args.pre_train_path}")
         checkpoint = torch.load(args.pre_train_path, map_location=device)
