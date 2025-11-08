@@ -26,6 +26,15 @@ export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 # 记录日志文件名
 LOG_FILE="train_multi_dataset_$(date +%m%d_%H%M).log"
 
+# 定义关机函数
+shutdown_on_exit() {
+    echo "Training finished. Shutting down..."
+    /usr/bin/shutdown -h now
+}
+
+# 设置trap，确保脚本退出时（正常退出、被kill、异常等）都会执行关机
+trap shutdown_on_exit EXIT INT TERM
+
 echo "Starting training... Log file: $LOG_FILE"
 echo "To monitor training: tail -f $LOG_FILE"
 echo "To stop training: pkill -f train_enhanced_multi_dataset.py"
@@ -39,6 +48,5 @@ deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --loss_config_path configs/enhanced_loss_config.yaml \
      > "$LOG_FILE" 2>&1
 
-# 训练结束（无论成功或失败），执行关机
-echo "Training finished. Shutting down..."
-/usr/bin/shutdown -h now
+# 训练正常结束，执行关机（trap也会捕获，但这里显式调用确保执行）
+shutdown_on_exit
