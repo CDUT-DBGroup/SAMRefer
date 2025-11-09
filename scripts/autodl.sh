@@ -38,6 +38,9 @@ deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --config configs/main_refersam_bert.yaml \
     --use_enhanced_loss \
     --loss_config_path configs/enhanced_loss_config.yaml \
-     > "$LOG_FILE" 2>&1
+     > "$LOG_FILE" 2>&1 &
 
-sudo /usr/bin/shutdown -h now
+
+wait
+echo "Training completed successfully. Shutting down..."
+/usr/bin/shutdown -h now
