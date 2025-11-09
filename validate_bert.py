@@ -252,7 +252,7 @@ def create_datasets(args):
                 'splitBy': 'final',
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
-                'split': 'val',
+                'split': 'test',
                 'eval_mode': True,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
