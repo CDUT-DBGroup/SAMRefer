@@ -250,11 +250,11 @@ def main():
     )
     # 合并所有训练数据集
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_refcocog,
-        train_dataset_zom,
-        train_dataset_gref,
+        # train_dataset_refcocog,
+        # train_dataset_zom,
+        # train_dataset_gref,
         train_dataset_coco,
-        train_dataset_refcocoplus
+        # train_dataset_refcocoplus
     ])
     
     # 验证数据集（使用RefCOCO）
