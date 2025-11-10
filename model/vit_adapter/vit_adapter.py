@@ -58,6 +58,17 @@ class ViTAdapter(nn.Module):
             for i in range(num_prompt_layers)
         ])
 
+        # 多尺度特征融合模块（用于vit_feats）
+        # 融合c2, c3, c4三个尺度的特征，提升vit_feats的质量
+        self.vit_feats_fusion = nn.Sequential(
+            nn.Conv2d(out_dim * 3, out_dim, kernel_size=3, padding=1, bias=False),
+            nn.GroupNorm(1, out_dim, eps=1e-6),
+            nn.GELU(),
+            nn.Conv2d(out_dim, out_dim, kernel_size=1, bias=False),
+            nn.GroupNorm(1, out_dim, eps=1e-6)
+        )
+        self.vit_feats_fusion.apply(self._init_weights)
+
         if with_deconv:
             self.c1_conv = nn.Conv2d(conv_inplane, out_dim, kernel_size=1, bias=False)
             self.c1_norm = nn.GroupNorm(1, out_dim, eps=1e-6)
@@ -200,7 +211,20 @@ class ViTAdapter(nn.Module):
 
         # ViT neck
         vit_feats = vit_feats.permute(0, 3, 1, 2)
-        vit_feats = self.vis_model.neck(vit_feats)
-        vit_feats = vit_feats + c3
+        vit_feats = self.vis_model.neck(vit_feats)  # [B, out_chans, h, w]
+
+        # 多尺度特征融合
+        # c2: [B, out_dim, h*2, w*2] -> 下采样到 [B, out_dim, h, w]
+        c2_resized = F.interpolate(c2, size=(h, w), mode='bilinear', align_corners=True)
+        # c3: [B, out_dim, h, w] -> 已经是正确尺寸
+        # c4: [B, out_dim, h//2, w//2] -> 上采样到 [B, out_dim, h, w]
+        c4_resized = F.interpolate(c4, size=(h, w), mode='bilinear', align_corners=True)
+
+        # 拼接并融合多尺度特征
+        multi_scale_feats = torch.cat([c2_resized, c3, c4_resized], dim=1)  # [B, out_dim*3, h, w]
+        fused_adapter_feats = self.vit_feats_fusion(multi_scale_feats)  # [B, out_dim, h, w]
+
+        # 残差连接融合到vit_feats
+        vit_feats = vit_feats + fused_adapter_feats
 
         return adapter_feats_list, vit_feats, lang_feats, all_prompts
