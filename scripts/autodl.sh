@@ -26,35 +26,33 @@ export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 # 记录日志文件名
 LOG_FILE="train_multi_dataset_$(date +%m%d_%H%M).log"
 
+trap 'echo "Training interrupted or completed. Shutting down..."; /usr/bin/shutdown -h now' EXIT
 
 echo "Starting training... Log file: $LOG_FILE"
 echo "To monitor training: tail -f $LOG_FILE"
 echo "To stop training: pkill -f train_enhanced_multi_dataset.py"
 
-# 运行训练命令（后台运行，会阻塞直到完成）
+# 运行训练命令（前台运行，会阻塞直到完成）
 # 无论训练成功或失败，完成后都会自动关机
-nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
+deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/main_refersam_bert.yaml \
     --use_enhanced_loss \
     --loss_config_path configs/enhanced_loss_config.yaml \
-     > "$LOG_FILE" 2>&1 &
+     > "$LOG_FILE" 2>&1
 
-# 保存后台进程的 PID
-TRAIN_PID=$!
-echo "Training process started with PID: $TRAIN_PID"
-
-# 等待训练进程完成（包括所有子进程）
-wait $TRAIN_PID
+# 获取训练命令的退出状态码
 TRAIN_EXIT_CODE=$?
 
-# 检查训练是否成功完成
+# 等待所有后台进程完成
+wait
+
+# 根据退出状态码判断训练结果
 if [ $TRAIN_EXIT_CODE -eq 0 ]; then
-    echo "Training completed successfully. Exit code: $TRAIN_EXIT_CODE"
+    echo "Training completed successfully. Shutting down..."
 else
-    echo "Training completed with errors. Exit code: $TRAIN_EXIT_CODE"
+    echo "Training failed with exit code $TRAIN_EXIT_CODE. Shutting down..."
 fi
 
-echo "Shutting down..."
-# 使用 sudo shutdown 或直接 shutdown，根据系统权限配置
+# 无论成功或失败都自动关机
 /usr/bin/shutdown -h now

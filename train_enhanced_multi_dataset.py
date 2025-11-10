@@ -338,9 +338,15 @@ def main():
             logger.info(f"Resuming from checkpoint: {resume_path}")
         # 实际上 load_checkpoint 只需要传父目录，deepspeed 会自动找最新 global_step
         _, client_state = model_engine.load_checkpoint(resume_path)
-        start_epoch = client_state.get('epoch', 0)
-        best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
-        logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
+        # 处理 client_state 为 None 的情况（checkpoint 加载失败）
+        if client_state is not None:
+            start_epoch = client_state.get('epoch', 0)
+            best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
+            logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
+        else:
+            logger.warning(f"Failed to load checkpoint from {resume_path}, starting from epoch 0")
+            start_epoch = 0
+            best_iou_miou_sum = 0
     # broadcast resume info to all ranks
     start_epoch_tensor = torch.tensor([start_epoch], dtype=torch.int, device=device)
     best_iou_miou_sum_tensor = torch.tensor([best_iou_miou_sum], dtype=torch.float, device=device)
@@ -683,5 +689,15 @@ def main():
 if __name__ == '__main__':
     import torch.multiprocessing as mp
     mp.set_start_method('fork', force=True)
-    main()
-    evaluate_four_datasets()
+    try:
+        main()
+        evaluate_four_datasets()
+    except Exception as e:
+        import traceback
+        print(f"训练过程中发生错误: {e}")
+        traceback.print_exc()
+        # 确保分布式进程组被正确清理
+        if dist.is_initialized():
+            dist.destroy_process_group()
+        # 退出时使用非零状态码，表示错误
+        sys.exit(1)
