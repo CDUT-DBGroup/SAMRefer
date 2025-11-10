@@ -52,7 +52,7 @@ class ViTAdapter(nn.Module):
         self.postional_encoding_prompter = SinePositionalEncoding(num_feats=out_dim//2, normalize=True)
         # 可学习的权重参数，用于组合基础token和加权聚合的文本特征
         # 初始化为接近原始权重0.7和0.3的值（通过logit空间：log(0.7/0.3) ≈ 0.85）
-        # self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
+        self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
         self.prompt_blocks = nn.Sequential(*[
             PromptAttnLayer(out_dim, out_dim, out_dim, heads=8, mlp_ratio=4, n_levels=3, norm_layer=partial(nn.LayerNorm, eps=1e-6)) 
             for i in range(num_prompt_layers)
@@ -166,29 +166,29 @@ class ViTAdapter(nn.Module):
 
         # Prompt aggregation
         lvl_pos_emb_prompter = self._get_lvl_pos_embed_prompter(bs, H, W)
-        if self.using_clip:
-            eos_index = lang_mask.sum(1).long() - 1
-            lang_g = lang_feats[torch.arange(bs), eos_index].unsqueeze(1) # [B, 1, C], [EOS] embeddings
-        else:
-            lang_g = lang_feats[:, 0].unsqueeze(1) # [B, 1, C], [CLS] embeddings
-
-        # dense_prompts = lang_g.clone().detach()
-        dense_prompts = lang_g.clone()
-        # 不使用单个token，而是使用注意力聚合
-# 在 model/vit_adapter/vit_adapter.py 第166-172行
         # if self.using_clip:
         #     eos_index = lang_mask.sum(1).long() - 1
-        #     lang_g_base = lang_feats[torch.arange(bs), eos_index].unsqueeze(1)
+        #     lang_g = lang_feats[torch.arange(bs), eos_index].unsqueeze(1) # [B, 1, C], [EOS] embeddings
         # else:
-        #     lang_g_base = lang_feats[:, 0].unsqueeze(1)
+        #     lang_g = lang_feats[:, 0].unsqueeze(1) # [B, 1, C], [CLS] embeddings
 
-        # # 使用注意力聚合所有token（更充分利用文本信息）
-        # text_attn_weights = F.softmax(lang_feats.mean(-1), dim=1)  # [B, N_l]
-        # lang_g_weighted = (lang_feats * text_attn_weights.unsqueeze(-1)).sum(1).unsqueeze(1)  # [B, 1, C]
+        # # dense_prompts = lang_g.clone().detach()
+        # dense_prompts = lang_g.clone()
+        # 不使用单个token，而是使用注意力聚合
+# 在 model/vit_adapter/vit_adapter.py 第166-172行
+        if self.using_clip:
+            eos_index = lang_mask.sum(1).long() - 1
+            lang_g_base = lang_feats[torch.arange(bs), eos_index].unsqueeze(1)
+        else:
+            lang_g_base = lang_feats[:, 0].unsqueeze(1)
 
-        # # 结合基础token和加权聚合（使用可学习权重）
-        # fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
-        # lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_weighted
+        # 使用注意力聚合所有token（更充分利用文本信息）
+        text_attn_weights = F.softmax(lang_feats.mean(-1), dim=1)  # [B, N_l]
+        lang_g_weighted = (lang_feats * text_attn_weights.unsqueeze(-1)).sum(1).unsqueeze(1)  # [B, 1, C]
+
+        # 结合基础token和加权聚合（使用可学习权重）
+        fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
+        lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_weighted
         dense_prompts = lang_g  # 不需要detach，也不需要clone（因为后面会concat）
         sparse_prompts = self.sparse_prompts.weight.unsqueeze(0).expand(bs, -1, -1) # [B, P, C]
         prompt_pos = self.prompt_pos.weight.unsqueeze(0).expand(bs, -1, -1) # [B, 1+P, C]
