@@ -262,8 +262,6 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
         use_bf16: 是否使用 bf16
         model_engine: DeepSpeed 引擎（如果是 DeepSpeed checkpoint），否则为 None
     """
-    import deepspeed
-    
     if device is None:
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
@@ -275,11 +273,39 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
     
     # 检查返回值格式
     if isinstance(result, tuple) and len(result) == 3:
-        # DeepSpeed checkpoint
+        # DeepSpeed checkpoint - 只在需要时才导入和初始化 DeepSpeed
         model, is_deepspeed, checkpoint_info = result
         assert is_deepspeed, "Expected DeepSpeed checkpoint but got False"
         
         model = model.to(device)
+        
+        # 设置环境变量以避免 MPI 检测问题（单机单卡测试时）
+        # 如果未设置分布式相关环境变量，设置为单机单卡模式
+        if 'RANK' not in os.environ:
+            os.environ['RANK'] = '0'
+        if 'LOCAL_RANK' not in os.environ:
+            os.environ['LOCAL_RANK'] = '0'
+        if 'WORLD_SIZE' not in os.environ:
+            os.environ['WORLD_SIZE'] = '1'
+        if 'MASTER_ADDR' not in os.environ:
+            os.environ['MASTER_ADDR'] = 'localhost'
+        if 'MASTER_PORT' not in os.environ:
+            os.environ['MASTER_PORT'] = '29500'
+        
+        # 禁用 MPI 检测，避免 MPI 初始化错误
+        os.environ['PMI_RANK'] = '0'
+        os.environ['PMI_SIZE'] = '1'
+        # 禁用 DeepSpeed 的自动 MPI 检测
+        os.environ['DEEPSPEED_AUTOTUNE'] = '0'
+        
+        import deepspeed
+        
+        # 尝试初始化分布式环境（如果尚未初始化）
+        try:
+            deepspeed.init_distributed()
+        except (RuntimeError, ValueError):
+            # 如果已经初始化或初始化失败，继续执行
+            pass
         
         # 初始化 DeepSpeed 引擎
         if hasattr(model, 'params_to_optimize'):
@@ -287,6 +313,7 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
         else:
             param_groups = model.parameters()
         
+        # 使用单机模式初始化 DeepSpeed
         model_engine, optimizer, _, _ = deepspeed.initialize(
             model=model,
             model_parameters=param_groups,

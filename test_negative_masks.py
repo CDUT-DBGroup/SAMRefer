@@ -44,7 +44,7 @@ def load_model(args, device):
     return eval_model, use_fp16, use_bf16
 
 
-def test_negative_masks(use_negative_masks=True, num_samples=50, checkpoint_path=None):
+def test_negative_masks(use_negative_masks=True, num_samples=50, checkpoint_path=None, args=None):
     """
     快速测试负样本掩码功能
     
@@ -52,13 +52,15 @@ def test_negative_masks(use_negative_masks=True, num_samples=50, checkpoint_path
         use_negative_masks: 是否使用负样本掩码
         num_samples: 测试样本数量（0表示使用全部）
         checkpoint_path: 模型 checkpoint 路径
+        args: 参数对象，如果为 None 则调用 get_args() 获取
     """
     logger.info("=" * 60)
     logger.info(f"测试负样本掩码功能 (use_negative_masks={use_negative_masks})")
     logger.info("=" * 60)
     
     # 获取参数
-    args = get_args()
+    if args is None:
+        args = get_args()
     
     # 如果提供了 checkpoint 路径，覆盖 args 中的路径
     if checkpoint_path:
@@ -127,7 +129,7 @@ def test_negative_masks(use_negative_masks=True, num_samples=50, checkpoint_path
     return metrics
 
 
-def compare_with_without_negative_masks(num_samples=50, checkpoint_path=None):
+def compare_with_without_negative_masks(num_samples=50, checkpoint_path=None, args=None):
     """
     对比使用和不使用负样本掩码的性能差异
     """
@@ -140,7 +142,8 @@ def compare_with_without_negative_masks(num_samples=50, checkpoint_path=None):
     metrics_without = test_negative_masks(
         use_negative_masks=False, 
         num_samples=num_samples,
-        checkpoint_path=checkpoint_path
+        checkpoint_path=checkpoint_path,
+        args=args
     )
     
     # 使用负样本掩码
@@ -148,7 +151,8 @@ def compare_with_without_negative_masks(num_samples=50, checkpoint_path=None):
     metrics_with = test_negative_masks(
         use_negative_masks=True, 
         num_samples=num_samples,
-        checkpoint_path=checkpoint_path
+        checkpoint_path=checkpoint_path,
+        args=args
     )
     
     # 对比结果
@@ -171,7 +175,8 @@ def compare_with_without_negative_masks(num_samples=50, checkpoint_path=None):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='测试负样本掩码功能')
+    # 先解析脚本特有的参数，使用 parse_known_args 避免与 get_args() 冲突
+    parser = argparse.ArgumentParser(description='测试负样本掩码功能', add_help=False)
     parser.add_argument('--use_negative_masks', action='store_true', 
                        help='启用负样本掩码功能')
     parser.add_argument('--compare', action='store_true',
@@ -181,18 +186,37 @@ if __name__ == '__main__':
     parser.add_argument('--pre_train_path', type=str, default=None,
                        help='模型 checkpoint 路径（可选，会覆盖配置文件中的路径）')
     
-    args = parser.parse_args()
+    # 解析已知参数，剩余参数会传递给 get_args()
+    script_args, remaining_argv = parser.parse_known_args()
     
-    if args.compare:
+    # 将剩余参数设置回 sys.argv，让 get_args() 可以解析它们
+    import sys
+    original_argv = sys.argv
+    sys.argv = [sys.argv[0]] + remaining_argv
+    
+    # 获取模型配置参数
+    try:
+        model_args = get_args()
+    finally:
+        # 恢复原始 argv
+        sys.argv = original_argv
+    
+    # 如果提供了 checkpoint 路径，覆盖 model_args 中的路径
+    if script_args.pre_train_path:
+        model_args.pre_train_path = script_args.pre_train_path
+    
+    if script_args.compare:
         # 对比测试
         compare_with_without_negative_masks(
-            num_samples=args.num_samples,
-            checkpoint_path=args.pre_train_path
+            num_samples=script_args.num_samples,
+            checkpoint_path=script_args.pre_train_path,
+            args=model_args
         )
     else:
         # 单次测试
         test_negative_masks(
-            use_negative_masks=args.use_negative_masks,
-            num_samples=args.num_samples,
-            checkpoint_path=args.pre_train_path
+            use_negative_masks=script_args.use_negative_masks,
+            num_samples=script_args.num_samples,
+            checkpoint_path=script_args.pre_train_path,
+            args=model_args
         )
