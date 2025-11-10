@@ -40,6 +40,7 @@ nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --loss_config_path configs/enhanced_loss_config.yaml \
      > "$LOG_FILE" 2>&1 &
 
+
 # 保存后台进程的 PID
 TRAIN_PID=$!
 echo "Training process started with PID: $TRAIN_PID"

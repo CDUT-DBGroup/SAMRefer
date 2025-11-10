@@ -266,10 +266,7 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     
     # 创建模型
-    if loss_config_path is not None:
-        result = model_func(pretrained=pretrained, args=args, loss_config_path=loss_config_path)
-    else:
-        result = model_func(pretrained=pretrained, args=args)
+    result = model_func(pretrained=pretrained, args=args)
     
     # 检查返回值格式
     if isinstance(result, tuple) and len(result) == 3:

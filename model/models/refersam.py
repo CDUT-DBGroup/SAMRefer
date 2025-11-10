@@ -146,13 +146,23 @@ class ReferSAM(nn.Module):
         mask_features_norm = F.normalize(mask_features, p=2, dim=2)  # [B, num_masks, C]
         
         # 计算余弦相似度
+        # torch.bmm 需要 float32，所以先转换类型
+        text_global_norm_float = text_global_norm.float()
+        mask_features_norm_float = mask_features_norm.float()
         similarities = torch.bmm(
-            text_global_norm.unsqueeze(1),  # [B, 1, C]
-            mask_features_norm.transpose(1, 2)  # [B, C, num_masks]
+            text_global_norm_float.unsqueeze(1),  # [B, 1, C]
+            mask_features_norm_float.transpose(1, 2)  # [B, C, num_masks]
         ).squeeze(1)  # [B, num_masks]
+        # 转换回原始数据类型
+        similarities = similarities.to(text_global_norm.dtype)
         
         # 归一化IoU预测值到[0,1]范围（IoU预测通常在[-1,1]或类似范围）
-        iou_normalized = torch.sigmoid(iou_preds)  # [B, num_masks]
+        # 确保 iou_preds 和 similarities 类型一致
+        iou_preds_float = iou_preds.float() if iou_preds.dtype != similarities.dtype else iou_preds
+        iou_normalized = torch.sigmoid(iou_preds_float)  # [B, num_masks]
+        # 确保类型一致
+        if iou_normalized.dtype != similarities.dtype:
+            iou_normalized = iou_normalized.to(similarities.dtype)
         
         # 结合IoU预测和相似度（可调权重）
         similarity_weight = 0.7
