@@ -101,6 +101,9 @@ class MultiDatasetWrapper:
 
 
 def main():
+    # 设置分布式超时，防止卡死（30分钟超时）
+    os.environ['NCCL_TIMEOUT'] = '1800'  # 30分钟
+    os.environ['GLOO_TIMEOUT_SECONDS'] = '1800'  # 30分钟
     # 初始化 DeepSpeed
     deepspeed.init_distributed()
     
@@ -247,11 +250,11 @@ def main():
     )
     # 合并所有训练数据集
     train_dataset = torch.utils.data.ConcatDataset([
+        train_dataset_refcocog,
+        train_dataset_zom,
+        train_dataset_gref,
         train_dataset_coco,
-        # train_dataset_refcocoplus, 
-        # train_dataset_refcocog,
-        # train_dataset_zom,
-        # train_dataset_gref
+        train_dataset_refcocoplus
     ])
     
     # 验证数据集（使用RefCOCO）
