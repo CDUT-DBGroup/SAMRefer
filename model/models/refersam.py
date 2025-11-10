@@ -96,9 +96,9 @@ class ReferSAM(nn.Module):
         dense_pe = self.sam_prompt_encoder.pe_layer(spatial_shape).unsqueeze(0)
         return sparse_embeddings, dense_embeddings, dense_pe
 
-    def _select_positive_negative_masks(self, masks, iou_preds, text_feats, text_mask, mask_feature):
+    def _compute_mask_weights(self, masks, iou_preds, text_feats, text_mask, mask_feature):
         """
-        基于文本-掩码相似度选择正负掩码
+        计算多个掩码的融合权重（基于IoU和文本-掩码相似度）
         
         Args:
             masks: [B, 3, H, W] 多个候选掩码（低分辨率）
@@ -108,8 +108,8 @@ class ReferSAM(nn.Module):
             mask_feature: [B, C, H, W] 掩码特征图（高分辨率）
         
         Returns:
-            positive_mask: [B, 1, H, W] 正样本掩码（低分辨率）
-            negative_mask: [B, 1, H, W] 负样本掩码（低分辨率）
+            mask_weights: [B, 3] 每个掩码的融合权重（已归一化）
+            best_mask_idx: [B] 最佳掩码的索引
         """
         B, num_masks, H, W = masks.shape
         
@@ -130,13 +130,13 @@ class ReferSAM(nn.Module):
         for i in range(num_masks):
             mask = masks[:, i:i+1]  # [B, 1, H, W]
             # 使用掩码对mask_feature进行加权平均
-            mask_weights = torch.sigmoid(mask)  # 归一化到[0,1]
+            mask_prob = torch.sigmoid(mask)  # 归一化到[0,1]
             # 归一化掩码权重（避免除零）
-            mask_sum = mask_weights.sum(dim=(2, 3), keepdim=True) + 1e-8
-            mask_weights = mask_weights / mask_sum
+            mask_sum = mask_prob.sum(dim=(2, 3), keepdim=True) + 1e-8
+            mask_prob_normalized = mask_prob / mask_sum
             
             # 计算掩码区域的特征（加权平均）
-            mask_feat = (mask_feat_resized * mask_weights).sum(dim=(2, 3))  # [B, C]
+            mask_feat = (mask_feat_resized * mask_prob_normalized).sum(dim=(2, 3))  # [B, C]
             mask_features.append(mask_feat)
         
         mask_features = torch.stack(mask_features, dim=1)  # [B, num_masks, C]
@@ -146,68 +146,92 @@ class ReferSAM(nn.Module):
         mask_features_norm = F.normalize(mask_features, p=2, dim=2)  # [B, num_masks, C]
         
         # 计算余弦相似度
-        # torch.bmm 需要 float32，所以先转换类型
         text_global_norm_float = text_global_norm.float()
         mask_features_norm_float = mask_features_norm.float()
         similarities = torch.bmm(
             text_global_norm_float.unsqueeze(1),  # [B, 1, C]
             mask_features_norm_float.transpose(1, 2)  # [B, C, num_masks]
         ).squeeze(1)  # [B, num_masks]
-        # 转换回原始数据类型
         similarities = similarities.to(text_global_norm.dtype)
         
-        # 归一化IoU预测值到[0,1]范围（IoU预测通常在[-1,1]或类似范围）
-        # 确保 iou_preds 和 similarities 类型一致
+        # 归一化IoU预测值到[0,1]范围
         iou_preds_float = iou_preds.float() if iou_preds.dtype != similarities.dtype else iou_preds
         iou_normalized = torch.sigmoid(iou_preds_float)  # [B, num_masks]
-        # 确保类型一致
         if iou_normalized.dtype != similarities.dtype:
             iou_normalized = iou_normalized.to(similarities.dtype)
         
-        # 结合IoU预测和相似度（可调权重）
-        similarity_weight = 0.7
-        iou_weight = 0.3
+        # 结合IoU和相似度计算综合分数
+        # IoU权重更高，因为它是模型直接预测的质量指标
+        similarity_weight = 0.4
+        iou_weight = 0.6
         combined_scores = similarity_weight * similarities + iou_weight * iou_normalized
         
-        # 选择正样本（最高分）和负样本（最低分）
-        positive_idx = combined_scores.argmax(dim=1)  # [B]
-        negative_idx = combined_scores.argmin(dim=1)  # [B]
+        # 使用softmax计算归一化权重，使得高质量掩码获得更高权重
+        # 添加温度参数，使权重分布更平滑
+        temperature = 2.0
+        mask_weights = F.softmax(combined_scores / temperature, dim=1)  # [B, num_masks]
         
-        positive_mask = masks[torch.arange(B), positive_idx]  # [B, H, W]
-        negative_mask = masks[torch.arange(B), negative_idx]  # [B, H, W]
+        # 找到最佳掩码索引
+        best_mask_idx = combined_scores.argmax(dim=1)  # [B]
         
-        return positive_mask.unsqueeze(1), negative_mask.unsqueeze(1)
+        return mask_weights, best_mask_idx
 
-    def _adaptive_mask_fusion(self, positive_mask, negative_mask, iou_preds):
+    def _adaptive_multi_mask_fusion(self, masks, mask_weights, iou_preds, best_mask_idx):
         """
-        无需训练的自适应掩码融合策略
+        多掩码智能融合策略：根据权重对所有掩码进行加权融合
         
         Args:
-            positive_mask: [B, 1, H, W] 正样本掩码
-            negative_mask: [B, 1, H, W] 负样本掩码  
-            iou_preds: [B, 3] IoU预测值（用于计算融合权重）
+            masks: [B, 3, H, W] 多个候选掩码（低分辨率）
+            mask_weights: [B, 3] 每个掩码的融合权重（已归一化）
+            iou_preds: [B, 3] IoU预测值
+            best_mask_idx: [B] 最佳掩码的索引
         
         Returns:
             fused_mask: [B, 1, H, W] 融合后的掩码
         """
-        # 归一化掩码
-        positive_mask_norm = torch.sigmoid(positive_mask)  # [B, 1, H, W]
-        negative_mask_norm = torch.sigmoid(negative_mask)  # [B, 1, H, W]
+        B, num_masks, H, W = masks.shape
         
-        # 计算自适应权重（基于最高IoU的置信度）
-        max_iou = iou_preds.max(dim=1)[0]  # [B]
-        confidence = torch.clamp(torch.sigmoid(max_iou), 0.5, 1.0)  # 归一化到[0.5, 1.0]
+        # 归一化所有掩码
+        masks_norm = torch.sigmoid(masks)  # [B, 3, H, W]
+        
+        # 计算最佳掩码的IoU作为置信度
+        best_iou = iou_preds[torch.arange(B), best_mask_idx]  # [B]
+        confidence = torch.clamp(torch.sigmoid(best_iou * 2.0), 0.5, 1.0)  # [B]
         confidence = confidence.view(-1, 1, 1, 1)  # [B, 1, 1, 1]
         
-        # 融合策略：正掩码增强，负掩码作为抑制项
-        # 使用负掩码的反向信息来细化边界
-        negative_suppression = 0.3  # 负掩码抑制强度（可调超参数）
-        fused = positive_mask_norm * confidence - negative_mask_norm * (1 - confidence) * negative_suppression
+        # 策略1：如果最佳掩码的IoU很高（>0.8），主要使用最佳掩码，其他掩码作为微调
+        # 策略2：如果最佳掩码的IoU较低，使用加权融合利用所有掩码的互补信息
+        high_confidence_threshold = 0.8
+        best_iou_normalized = torch.sigmoid(best_iou * 2.0)
+        use_weighted_fusion = (best_iou_normalized < high_confidence_threshold).float().view(-1, 1, 1, 1)
         
-        # 边界细化：使用正负掩码的差异来识别边界区域
-        boundary = torch.abs(positive_mask_norm - negative_mask_norm)
-        boundary_enhancement = 0.2  # 边界增强系数（可调超参数）
-        fused = fused * (1 + boundary * boundary_enhancement)  # 在边界区域增强
+        # 基础加权融合：根据权重对所有掩码进行加权平均
+        mask_weights_expanded = mask_weights.unsqueeze(-1).unsqueeze(-1)  # [B, 3, 1, 1]
+        weighted_fusion = (masks_norm * mask_weights_expanded).sum(dim=1, keepdim=True)  # [B, 1, H, W]
+        
+        # 最佳掩码（用于高置信度情况）
+        best_mask = masks_norm[torch.arange(B), best_mask_idx].unsqueeze(1)  # [B, 1, H, W]
+        
+        # 自适应融合：高置信度时主要用最佳掩码，低置信度时用加权融合
+        # 但即使高置信度，也加入少量其他掩码信息来细化边界
+        fusion_ratio = 0.85  # 高置信度时，85%使用最佳掩码，15%使用加权融合
+        fused = (best_mask * fusion_ratio + weighted_fusion * (1 - fusion_ratio)) * (1 - use_weighted_fusion) + \
+                weighted_fusion * use_weighted_fusion
+        
+        # 边界细化：使用多个掩码的方差来识别不确定区域（边界）
+        # 计算掩码间的差异，在差异大的区域（边界）进行增强
+        mask_variance = masks_norm.var(dim=1, keepdim=True)  # [B, 1, H, W] 掩码间的方差
+        boundary_mask = (mask_variance > 0.05).float()  # 方差大于阈值的是边界区域
+        
+        # 在边界区域，使用多个掩码的最大值来增强（确保边界完整）
+        mask_max = masks_norm.max(dim=1, keepdim=True)[0]  # [B, 1, H, W]
+        boundary_enhancement = 0.1  # 边界增强系数
+        fused = fused * (1 - boundary_mask * boundary_enhancement) + \
+                mask_max * boundary_mask * boundary_enhancement
+        
+        # 根据置信度进行最终调整：高置信度时稍微增强，低置信度时保持原样
+        confidence_adjustment = 1.0 + (confidence - 0.5) * 0.05  # 在[1.0, 1.025]范围内
+        fused = fused * confidence_adjustment
         
         # 确保输出在[0,1]范围
         fused = torch.clamp(fused, 0, 1)
@@ -258,16 +282,16 @@ class ReferSAM(nn.Module):
         low_res_masks = low_res_masks.float()
         coarse_masks = coarse_masks.float()
 
-        # 如果使用负样本掩码，进行正负掩码选择和融合
+        # 如果使用多掩码融合，进行智能融合
         if use_negative_masks and not self.training:
-            # 选择正负掩码
-            positive_mask, negative_mask = self._select_positive_negative_masks(
+            # 计算每个掩码的融合权重
+            mask_weights, best_mask_idx = self._compute_mask_weights(
                 low_res_masks, iou_predictions, l_feats, l_mask, mask_feature
             )
             
-            # 自适应融合（返回的已经是[0,1]范围的概率值）
-            fused_mask = self._adaptive_mask_fusion(
-                positive_mask, negative_mask, iou_predictions
+            # 多掩码智能融合（返回的已经是[0,1]范围的概率值）
+            fused_mask = self._adaptive_multi_mask_fusion(
+                low_res_masks, mask_weights, iou_predictions, best_mask_idx
             )
             
             # 上采样到原始分辨率
