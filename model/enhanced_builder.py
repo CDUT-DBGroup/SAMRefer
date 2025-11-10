@@ -4,6 +4,8 @@ from transformers import BertModel
 from transformers import CLIPTextModel
 import yaml
 import os
+import glob
+import json
 
 from .models import *
 from .segment_anything import sam_model_registry
@@ -11,8 +13,71 @@ from .criterion import SegMaskLoss, criterion_dict
 from .enhanced_criterion import EnhancedSegMaskLoss, enhanced_criterion_dict
 
 
+def _is_deepspeed_checkpoint(checkpoint_path):
+    """
+    检测检查点路径是否是 DeepSpeed 格式
+    """
+    if not os.path.exists(checkpoint_path):
+        return False
+    
+    if os.path.isdir(checkpoint_path):
+        subdirs = glob.glob(os.path.join(checkpoint_path, "global_step*"))
+        if subdirs:
+            latest_subdir = max(subdirs, key=os.path.getmtime)
+            if os.path.exists(os.path.join(latest_subdir, "mp_rank_00")) or \
+               glob.glob(os.path.join(latest_subdir, "*.pt")):
+                return True
+        if os.path.exists(os.path.join(checkpoint_path, "mp_rank_00")):
+            return True
+    return False
+
+
+def _load_pytorch_checkpoint(model, checkpoint_path, device):
+    """
+    加载 PyTorch 格式的 checkpoint
+    """
+    if os.path.isdir(checkpoint_path):
+        # 查找所有 global_step 子目录
+        subdirs = glob.glob(os.path.join(checkpoint_path, "global_step*"))
+        if subdirs:
+            # 取最新的 global_step 子目录
+            latest_subdir = max(subdirs, key=os.path.getmtime)
+            print(f"Loading model weights from {latest_subdir}")
+            checkpoint = torch.load(latest_subdir, map_location=device)
+        else:
+            print(f"Loading model weights from {checkpoint_path}")
+            checkpoint = torch.load(checkpoint_path, map_location=device)
+    else:
+        print(f"Loading model weights from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # 处理不同的 checkpoint 格式
+    if isinstance(checkpoint, dict):
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        elif 'state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['state_dict'])
+        else:
+            # 可能是直接的 state_dict
+            model.load_state_dict(checkpoint)
+    else:
+        model.load_state_dict(checkpoint)
+    
+    model = model.to(device)
+    model.eval()
+    return model
+
+
 def _segm_refersam_enhanced(pretrained, args, criterion):
-    """Enhanced version of ReferSAM with improved loss functions"""
+    """
+    Enhanced version of ReferSAM with improved loss functions
+    支持 DeepSpeed 和 PyTorch 格式的 checkpoint 加载
+    
+    Returns:
+        model: 模型对象
+        is_deepspeed: 如果是 DeepSpeed checkpoint，返回 True，否则返回 False
+        checkpoint_info: 如果是 DeepSpeed checkpoint，返回相关信息字典，否则返回 None
+    """
     torch_dtype = torch.float32
     if args.precision == "bf16":
         torch_dtype = torch.bfloat16
@@ -50,14 +115,49 @@ def _segm_refersam_enhanced(pretrained, args, criterion):
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     
-    if pretrained is True:
+    # 处理 checkpoint 加载
+    is_deepspeed = False
+    checkpoint_info = None
+    
+    if pretrained is True and hasattr(args, 'pre_train_path') and args.pre_train_path:
+        checkpoint_path = args.pre_train_path
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-        print(f"Loading model weights from {args.pre_train_path}")
-        checkpoint = torch.load(args.pre_train_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model = model.to(device)
-        model.eval()
-    return model
+        
+        # 检测 checkpoint 格式
+        if _is_deepspeed_checkpoint(checkpoint_path):
+            is_deepspeed = True
+            print(f"Detected DeepSpeed checkpoint format: {checkpoint_path}")
+            
+            # 读取 DeepSpeed 配置
+            ds_config = getattr(args, 'deepspeed_config', 'configs/ds_config.json')
+            if not os.path.exists(ds_config):
+                ds_config = 'ds_config.json'
+            
+            use_fp16 = False
+            use_bf16 = False
+            if os.path.exists(ds_config):
+                with open(ds_config) as f:
+                    ds_conf = json.load(f)
+                use_fp16 = ds_conf.get("fp16", {}).get("enabled", False)
+                use_bf16 = ds_conf.get("bf16", {}).get("enabled", False)
+            
+            checkpoint_info = {
+                'checkpoint_path': checkpoint_path,
+                'ds_config': ds_config if os.path.exists(ds_config) else None,
+                'use_fp16': use_fp16,
+                'use_bf16': use_bf16
+            }
+            print(f"DeepSpeed checkpoint info: fp16={use_fp16}, bf16={use_bf16}")
+        else:
+            # PyTorch 格式的 checkpoint，直接加载
+            model = _load_pytorch_checkpoint(model, checkpoint_path, device)
+    
+    # 为了保持向后兼容，如果 pretrained=True 但不是 DeepSpeed，直接返回模型
+    # 如果是 DeepSpeed，返回模型和相关信息
+    if is_deepspeed:
+        return model, is_deepspeed, checkpoint_info
+    else:
+        return model
 
 
 def refersam_enhanced(pretrained=None, args=None, loss_config_path=None):
@@ -68,6 +168,10 @@ def refersam_enhanced(pretrained=None, args=None, loss_config_path=None):
         pretrained: Whether to load pretrained weights
         args: Model arguments
         loss_config_path: Path to loss configuration file
+    
+    Returns:
+        如果加载的是 DeepSpeed checkpoint，返回 (model, is_deepspeed, checkpoint_info)
+        否则返回 model
     """
     # Load loss configuration
     if loss_config_path and os.path.exists(loss_config_path):
@@ -107,24 +211,139 @@ def refersam_enhanced(pretrained=None, args=None, loss_config_path=None):
         dataset_weights=loss_config.get('dataset_weights', None)
     )
     
-    return _segm_refersam_enhanced(pretrained, args, criterion)
+    result = _segm_refersam_enhanced(pretrained, args, criterion)
+    return result
 
 
 def refersam_original(pretrained=None, args=None):
-    """Original ReferSAM with basic loss functions"""
+    """
+    Original ReferSAM with basic loss functions
+    
+    Returns:
+        如果加载的是 DeepSpeed checkpoint，返回 (model, is_deepspeed, checkpoint_info)
+        否则返回 model
+    """
     criterion = criterion_dict['mask']()
-    return _segm_refersam_enhanced(pretrained, args, criterion)
+    result = _segm_refersam_enhanced(pretrained, args, criterion)
+    return result
 
 
 # Backward compatibility
 def refersam(pretrained=None, args=None):
-    """Default ReferSAM - can be switched between original and enhanced"""
+    """
+    Default ReferSAM - can be switched between original and enhanced
+    
+    Returns:
+        如果加载的是 DeepSpeed checkpoint，返回 (model, is_deepspeed, checkpoint_info)
+        否则返回 model
+    """
     # Check if enhanced loss is enabled via args
     if hasattr(args, 'use_enhanced_loss') and args.use_enhanced_loss:
         loss_config_path = getattr(args, 'loss_config_path', None)
         return refersam_enhanced(pretrained, args, loss_config_path)
     else:
         return refersam_original(pretrained, args)
+
+
+def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=None, device=None):
+    """
+    统一的模型加载函数，支持 DeepSpeed 和 PyTorch checkpoint
+    
+    Args:
+        model_func: 模型创建函数 (refersam, refersam_enhanced, refersam_original)
+        pretrained: 是否加载预训练权重
+        args: 模型参数
+        loss_config_path: 损失配置文件路径（仅用于 enhanced 版本）
+        device: 设备，如果为 None 则自动选择
+    
+    Returns:
+        eval_model: 用于评估的模型（如果是 DeepSpeed，返回 model_engine.module，否则返回 model）
+        use_fp16: 是否使用 fp16
+        use_bf16: 是否使用 bf16
+        model_engine: DeepSpeed 引擎（如果是 DeepSpeed checkpoint），否则为 None
+    """
+    if device is None:
+        device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    
+    # 创建模型
+    result = model_func(pretrained=pretrained, args=args)
+    
+    # 检查返回值格式
+    if isinstance(result, tuple) and len(result) == 3:
+        # DeepSpeed checkpoint - 只在需要时才导入和初始化 DeepSpeed
+        model, is_deepspeed, checkpoint_info = result
+        assert is_deepspeed, "Expected DeepSpeed checkpoint but got False"
+        
+        model = model.to(device)
+        
+        # 设置环境变量以避免 MPI 检测问题（单机单卡测试时）
+        # 如果未设置分布式相关环境变量，设置为单机单卡模式
+        if 'RANK' not in os.environ:
+            os.environ['RANK'] = '0'
+        if 'LOCAL_RANK' not in os.environ:
+            os.environ['LOCAL_RANK'] = '0'
+        if 'WORLD_SIZE' not in os.environ:
+            os.environ['WORLD_SIZE'] = '1'
+        if 'MASTER_ADDR' not in os.environ:
+            os.environ['MASTER_ADDR'] = 'localhost'
+        if 'MASTER_PORT' not in os.environ:
+            os.environ['MASTER_PORT'] = '29500'
+        
+        # 禁用 MPI 检测，避免 MPI 初始化错误
+        os.environ['PMI_RANK'] = '0'
+        os.environ['PMI_SIZE'] = '1'
+        # 禁用 DeepSpeed 的自动 MPI 检测
+        os.environ['DEEPSPEED_AUTOTUNE'] = '0'
+        
+        import deepspeed
+        
+        # 尝试初始化分布式环境（如果尚未初始化）
+        try:
+            deepspeed.init_distributed()
+        except (RuntimeError, ValueError):
+            # 如果已经初始化或初始化失败，继续执行
+            pass
+        
+        # 初始化 DeepSpeed 引擎
+        if hasattr(model, 'params_to_optimize'):
+            param_groups = model.params_to_optimize()
+        else:
+            param_groups = model.parameters()
+        
+        # 使用单机模式初始化 DeepSpeed
+        model_engine, optimizer, _, _ = deepspeed.initialize(
+            model=model,
+            model_parameters=param_groups,
+            config=checkpoint_info['ds_config'] if checkpoint_info['ds_config'] else None
+        )
+        
+        # 加载 DeepSpeed checkpoint
+        checkpoint_path = checkpoint_info['checkpoint_path']
+        if os.path.isdir(checkpoint_path):
+            subdirs = glob.glob(os.path.join(checkpoint_path, "global_step*"))
+            if subdirs:
+                latest_subdir = max(subdirs, key=os.path.getmtime)
+                print(f"Loading DeepSpeed checkpoint from {checkpoint_path}, latest: {os.path.basename(latest_subdir)}")
+            else:
+                print(f"Loading DeepSpeed checkpoint from {checkpoint_path}")
+        else:
+            print(f"Loading DeepSpeed checkpoint from {checkpoint_path}")
+        
+        _, client_state = model_engine.load_checkpoint(checkpoint_path)
+        print(f"Successfully loaded DeepSpeed checkpoint")
+        if client_state:
+            print(f"Client state: {client_state}")
+        
+        model_engine.eval()
+        return model_engine.module, checkpoint_info['use_fp16'], checkpoint_info['use_bf16'], model_engine
+    else:
+        # PyTorch checkpoint 或未加载 checkpoint
+        model = result
+        if not hasattr(model, 'device') or next(model.parameters()).device != device:
+            model = model.to(device)
+        if pretrained:
+            model.eval()
+        return model, False, False, None
 
 
 def get_model_enhanced(args, loss_config_path=None):

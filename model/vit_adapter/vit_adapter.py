@@ -189,6 +189,7 @@ class ViTAdapter(nn.Module):
         # 结合基础token和加权聚合（使用可学习权重）
         fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
         lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_weighted
+
         dense_prompts = lang_g  # 不需要detach，也不需要clone（因为后面会concat）
         sparse_prompts = self.sparse_prompts.weight.unsqueeze(0).expand(bs, -1, -1) # [B, P, C]
         prompt_pos = self.prompt_pos.weight.unsqueeze(0).expand(bs, -1, -1) # [B, 1+P, C]

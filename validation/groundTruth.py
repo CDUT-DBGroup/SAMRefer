@@ -110,8 +110,18 @@ if __name__ == '__main__':
     #     num_classes=1,
     #     criterion=criterion
     # )
-    model = refersam(args=args, pretrained=True)
-    # Load trained model weights
-    model.eval()  # Set model to evaluation mode
+    from model.enhanced_builder import load_model_with_checkpoint
+    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    
+    # 使用统一的模型加载函数
+    loss_config_path = getattr(args, 'loss_config_path', None) if hasattr(args, 'use_enhanced_loss') and args.use_enhanced_loss else None
+    model, use_fp16, use_bf16, model_engine = load_model_with_checkpoint(
+        model_func=refersam,
+        pretrained=True,
+        args=args,
+        loss_config_path=loss_config_path,
+        device=device
+    )
+    # model 已经是 eval 模式
 
     visualize_sample(samples, targets, model=model,save_path='sample_debug.png')

@@ -5,14 +5,12 @@ from tqdm import tqdm
 import numpy as np
 from dataset.RefzomDataset import ReferzomDataset
 from dataset.GRefDataset import GRefDataset
-from model.builder import refersam
+from model.enhanced_builder import refersam, load_model_with_checkpoint
 from validation.evaluation import validate
 from get_args import get_args
 import random
 import logging
 import json
-import glob
-import deepspeed
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -76,23 +74,6 @@ def create_gref_dataset(args):
     )
     return dataset
 
-def load_deepspeed_checkpoint(checkpoint_path, model_engine):
-    # 支持目录resume，自动找最新global_step子目录
-    if os.path.isdir(checkpoint_path):
-        subdirs = glob.glob(os.path.join(checkpoint_path, "global_step*"))
-        if subdirs:
-            latest_subdir = max(subdirs, key=os.path.getmtime)
-            logger.info(f"从断点目录加载: {latest_subdir}")
-            checkpoint_path = latest_subdir
-        else:
-            logger.info(f"从断点目录加载: {checkpoint_path}")
-    else:
-        logger.info(f"从断点文件加载: {checkpoint_path}")
-    _, client_state = model_engine.load_checkpoint(checkpoint_path)
-    logger.info(f"成功加载断点: {checkpoint_path}")
-    logger.info(f"Client state: {client_state}")
-    return client_state
-
 def evaluate_refzom():
     args = get_args()
     os.makedirs(args.output_dir, exist_ok=True)
@@ -101,37 +82,28 @@ def evaluate_refzom():
 
     # 初始化模型
     logger.info("初始化模型...")
-    model = refersam(args=args)  # 不加载预训练权重
-    model = model.to(device)
-    total_params, trainable_params = count_parameters(model)
-    logger.info(f"模型参数总数: {total_params:,}, 可训练: {trainable_params:,}")
-
-    # 读取DeepSpeed配置
-    ds_config = 'configs/ds_config.json'
-    with open(ds_config) as f:
-        ds_conf = json.load(f)
-    use_fp16 = ds_conf.get("fp16", {}).get("enabled", False)
-    use_bf16 = ds_conf.get("bf16", {}).get("enabled", False)
-
-    # 初始化DeepSpeed引擎
-    logger.info("初始化DeepSpeed引擎...")
-    if hasattr(model, 'params_to_optimize'):
-        param_groups = model.params_to_optimize()
-    else:
-        param_groups = model.parameters()
-    model_engine, optimizer, _, _ = deepspeed.initialize(
-        model=model,
-        model_parameters=param_groups,
-        config=ds_config
+    
+    # 使用统一的模型加载函数
+    pretrained = hasattr(args, 'pre_train_path') and args.pre_train_path is not None
+    loss_config_path = getattr(args, 'loss_config_path', None) if hasattr(args, 'use_enhanced_loss') and args.use_enhanced_loss else None
+    
+    eval_model, use_fp16, use_bf16, model_engine = load_model_with_checkpoint(
+        model_func=refersam,
+        pretrained=pretrained,
+        args=args,
+        loss_config_path=loss_config_path,
+        device=device
     )
-
-    # 从断点恢复
-    if hasattr(args, 'pre_train_path') and args.pre_train_path:
-        logger.info(f"从预训练权重加载: {args.pre_train_path}")
-        load_deepspeed_checkpoint(args.pre_train_path, model_engine)
+    
+    total_params, trainable_params = count_parameters(eval_model)
+    logger.info(f"模型参数总数: {total_params:,}, 可训练: {trainable_params:,}")
+    
+    if model_engine is not None:
+        logger.info("成功加载 DeepSpeed checkpoint")
+    elif pretrained:
+        logger.info("成功加载 PyTorch checkpoint")
     else:
         logger.warning("未指定resume断点，将使用初始化模型进行验证。")
-    model_engine.eval()
 
     # 创建验证数据集
     logger.info("创建Refzom验证集...")
@@ -149,7 +121,7 @@ def evaluate_refzom():
     # 验证
     logger.info("开始验证...")
     use_negative_masks = getattr(args, 'use_negative_masks', False)
-    metrics = validate(model_engine.module, val_loader, device, use_fp16, use_bf16, use_negative_masks=use_negative_masks)
+    metrics = validate(eval_model, val_loader, device, use_fp16, use_bf16, use_negative_masks=use_negative_masks)
     logger.info("\n验证结果:")
     logger.info(f"mIoU: {metrics['mIoU']:.4f}")
     logger.info(f"oIoU: {metrics['oIoU']:.4f}")

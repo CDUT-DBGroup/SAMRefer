@@ -8,18 +8,15 @@ from dataset.Dataset_referit import ReferitDataset
 from dataset.GRefDataset import GRefDataset
 from dataset.ReferDataset import ReferDataset
 from dataset.RefzomDataset import ReferzomDataset
-from model.enhanced_builder import refersam
+from model.enhanced_builder import refersam, load_model_with_checkpoint
 from model.segment_anything.build_sam import sam_model_registry
 from validation.evaluation import validate
 import matplotlib.pyplot as plt
 import torchvision.transforms.functional as TF
 from get_args import get_args
 # os.environ["CUDA_VISIBLE_DEVICES"]="1"
-import glob
 import random
 import logging
-import json
-import deepspeed
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -267,56 +264,6 @@ def create_datasets(args):
     return datasets
 
 
-def is_deepspeed_checkpoint(checkpoint_path):
-    """
-    检测检查点路径是否是 DeepSpeed 格式
-    DeepSpeed 检查点通常包含 global_step 子目录或 mp_rank_00 等目录
-    """
-    if not os.path.exists(checkpoint_path):
-        return False
-    
-    if os.path.isdir(checkpoint_path):
-        # 检查是否有 global_step 子目录
-        subdirs = glob.glob(os.path.join(checkpoint_path, "global_step*"))
-        if subdirs:
-            # 检查 global_step 子目录中是否有 DeepSpeed 检查点文件
-            latest_subdir = max(subdirs, key=os.path.getmtime)
-            # DeepSpeed 检查点通常包含 mp_rank_00 目录或 model_states.pt 等文件
-            if os.path.exists(os.path.join(latest_subdir, "mp_rank_00")) or \
-               glob.glob(os.path.join(latest_subdir, "*.pt")):
-                return True
-        # 检查根目录是否有 mp_rank_00 目录
-        if os.path.exists(os.path.join(checkpoint_path, "mp_rank_00")):
-            return True
-    return False
-
-
-def load_deepspeed_checkpoint(checkpoint_path, model_engine):
-    """
-    加载 DeepSpeed 检查点
-    DeepSpeed 的 load_checkpoint 会自动查找最新的 global_step 子目录
-    """
-    # 记录检查点路径信息
-    if os.path.isdir(checkpoint_path):
-        subdirs = glob.glob(os.path.join(checkpoint_path, "global_step*"))
-        if subdirs:
-            latest_subdir = max(subdirs, key=os.path.getmtime)
-            logger.info(f"Found DeepSpeed checkpoint directory with global_step subdirectories")
-            logger.info(f"Loading from parent directory: {checkpoint_path}")
-            logger.info(f"Latest global_step: {os.path.basename(latest_subdir)}")
-        else:
-            logger.info(f"Loading DeepSpeed checkpoint from: {checkpoint_path}")
-    else:
-        logger.info(f"Loading DeepSpeed checkpoint from: {checkpoint_path}")
-    
-    # DeepSpeed 的 load_checkpoint 会自动查找最新的 global_step，所以直接传父目录
-    _, client_state = model_engine.load_checkpoint(checkpoint_path)
-    logger.info(f"Successfully loaded DeepSpeed checkpoint: {checkpoint_path}")
-    if client_state:
-        logger.info(f"Client state: {client_state}")
-    return client_state
-
-
 def evaluate_four_datasets():
     # Fixed arguments for BERT configuration
     args = get_args()
@@ -329,86 +276,25 @@ def evaluate_four_datasets():
 
     # Initialize models and criterion
     logger.info("Initializing models...")
-    model = refersam(args=args, pretrained=False)
-    model = model.to(device)
     
-    # 检测是否是 DeepSpeed 检查点
-    use_deepspeed = False
-    model_engine = None
-    use_fp16 = False
-    use_bf16 = False
+    # 使用统一的模型加载函数
+    pretrained = hasattr(args, 'pre_train_path') and args.pre_train_path is not None
+    loss_config_path = getattr(args, 'loss_config_path', None) if hasattr(args, 'use_enhanced_loss') and args.use_enhanced_loss else None
     
-    if hasattr(args, 'pre_train_path') and args.pre_train_path:
-        if is_deepspeed_checkpoint(args.pre_train_path):
-            use_deepspeed = True
-            logger.info("Detected DeepSpeed checkpoint format, initializing DeepSpeed engine...")
-            
-            # 读取 DeepSpeed 配置
-            ds_config = getattr(args, 'deepspeed_config', 'configs/ds_config.json')
-            if not os.path.exists(ds_config):
-                # 尝试其他可能的路径
-                ds_config = 'ds_config.json'
-            if os.path.exists(ds_config):
-                with open(ds_config) as f:
-                    ds_conf = json.load(f)
-                use_fp16 = ds_conf.get("fp16", {}).get("enabled", False)
-                use_bf16 = ds_conf.get("bf16", {}).get("enabled", False)
-                logger.info(f"DeepSpeed config: fp16={use_fp16}, bf16={use_bf16}")
-            else:
-                logger.warning(f"DeepSpeed config file not found at {ds_config}, using default settings")
-            
-            # 初始化 DeepSpeed 引擎
-            if hasattr(model, 'params_to_optimize'):
-                param_groups = model.params_to_optimize()
-            else:
-                param_groups = model.parameters()
-            
-            model_engine, optimizer, _, _ = deepspeed.initialize(
-                model=model,
-                model_parameters=param_groups,
-                config=ds_config if os.path.exists(ds_config) else None
-            )
-            
-            # 加载 DeepSpeed 检查点
-            logger.info(f"Loading DeepSpeed checkpoint from {args.pre_train_path}")
-            load_deepspeed_checkpoint(args.pre_train_path, model_engine)
-            model_engine.eval()
-        else:
-            # 使用普通 PyTorch 检查点加载方式
-            logger.info("Using standard PyTorch checkpoint loading...")
-            if os.path.isdir(args.pre_train_path):
-                # 查找所有 global_step 子目录
-                subdirs = glob.glob(os.path.join(args.pre_train_path, "global_step*"))
-                if subdirs:
-                    # 取最新的 global_step 子目录
-                    latest_subdir = max(subdirs, key=os.path.getmtime)
-                    logger.info(f"Resuming from checkpoint: {latest_subdir}")
-                    checkpoint = torch.load(latest_subdir, map_location=device)
-                    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                        model.load_state_dict(checkpoint['model_state_dict'])
-                    else:
-                        model.load_state_dict(checkpoint)
-                else:
-                    logger.info(f"Resuming from checkpoint: {args.pre_train_path}")
-                    checkpoint = torch.load(args.pre_train_path, map_location=device)
-                    if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                        model.load_state_dict(checkpoint['model_state_dict'])
-                    else:
-                        model.load_state_dict(checkpoint)
-            else:
-                logger.info(f"Loading model weights from {args.pre_train_path}")
-                checkpoint = torch.load(args.pre_train_path, map_location=device)
-                if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                    model.load_state_dict(checkpoint['model_state_dict'])
-                else:
-                    model.load_state_dict(checkpoint)
-            model.eval()  # Set model to evaluation mode
+    eval_model, use_fp16, use_bf16, model_engine = load_model_with_checkpoint(
+        model_func=refersam,
+        pretrained=pretrained,
+        args=args,
+        loss_config_path=loss_config_path,
+        device=device
+    )
+    
+    if model_engine is not None:
+        logger.info("Successfully loaded DeepSpeed checkpoint")
+    elif pretrained:
+        logger.info("Successfully loaded PyTorch checkpoint")
     else:
         logger.warning("No checkpoint path specified, using initialized model")
-        model.eval()
-    
-    # 获取实际用于验证的模型
-    eval_model = model_engine.module if use_deepspeed else model
     
     # Print model parameters
     total_params, trainable_params = count_parameters(eval_model)
