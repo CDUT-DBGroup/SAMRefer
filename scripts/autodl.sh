@@ -27,7 +27,7 @@ export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 LOG_FILE="train_multi_dataset_$(date +%m%d_%H%M).log"
 PID_FILE="/tmp/train_enhanced_multi_dataset.pid"
 HEALTH_CHECK_INTERVAL=300  # 健康检查间隔（秒）：5分钟
-LOG_UPDATE_TIMEOUT=600     # 日志无更新超时（秒）：10分钟
+LOG_UPDATE_TIMEOUT=300     # 日志无更新超时（秒）：5分钟
 MAX_TRAINING_TIME=432000    # 最大训练时间（秒）：24小时
 
 # 清理函数：杀死所有相关进程

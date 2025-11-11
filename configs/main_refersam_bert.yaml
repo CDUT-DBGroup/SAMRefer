@@ -1,8 +1,8 @@
 batch_size: 16
-epochs: 30
+epochs: 40
 lr: 2e-5
 weight_decay: 0.01
-img_size: 384
+img_size: 480
 max_tokens: 30
 warmup_epochs: 3
 cosine_lr: true

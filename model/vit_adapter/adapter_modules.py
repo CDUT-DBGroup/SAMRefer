@@ -24,25 +24,38 @@ def get_reference_points(spatial_shapes, device):
     return reference_points
 
 
-def deform_inputs(h1, w1, h2, w2, device):
-    spatial_shapes = torch.as_tensor([(h1 // 8, w1 // 8),
-                                      (h1 // 16, w1 // 16),
-                                      (h1 // 32, w1 // 32)],
-                                     dtype=torch.long, device=device)
+def deform_inputs(h1, w1, h2, w2, device, actual_spatial_shapes=None):
+    """
+    Args:
+        h1, w1: 输入图像的高度和宽度
+        h2, w2: ViT特征图的高度和宽度
+        device: 设备
+        actual_spatial_shapes: 可选，实际的特征图空间尺寸列表 [(h2, w2), (h3, w3), (h4, w4)]
+                              如果提供，将使用这些实际尺寸而不是整数除法计算
+    """
+    if actual_spatial_shapes is not None:
+        # 使用实际的特征图尺寸
+        spatial_shapes = torch.as_tensor(actual_spatial_shapes, dtype=torch.long, device=device)
+    else:
+        # 使用整数除法（向后兼容）
+        spatial_shapes = torch.as_tensor([(h1 // 8, w1 // 8),
+                                          (h1 // 16, w1 // 16),
+                                          (h1 // 32, w1 // 32)],
+                                         dtype=torch.long, device=device)
     level_start_index = torch.cat((spatial_shapes.new_zeros(
         (1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
     reference_points = get_reference_points([(h2, w2)], device)
-    # reference_points = get_reference_points([(h1 // 8, w1 // 8),
-    #                                          (h1 // 16, w1 // 16),
-    #                                          (h1 // 32, w1 // 32)], device)
     deform_inputs1 = [reference_points, spatial_shapes, level_start_index]
     
     spatial_shapes = torch.as_tensor([(h2, w2)], dtype=torch.long, device=device)
     level_start_index = torch.cat((spatial_shapes.new_zeros(
         (1,)), spatial_shapes.prod(1).cumsum(0)[:-1]))
-    reference_points = get_reference_points([(h1 // 8, w1 // 8),
-                                             (h1 // 16, w1 // 16),
-                                             (h1 // 32, w1 // 32)], device)
+    if actual_spatial_shapes is not None:
+        reference_points = get_reference_points(actual_spatial_shapes, device)
+    else:
+        reference_points = get_reference_points([(h1 // 8, w1 // 8),
+                                                 (h1 // 16, w1 // 16),
+                                                 (h1 // 32, w1 // 32)], device)
     deform_inputs2 = [reference_points, spatial_shapes, level_start_index]
     
     return deform_inputs1, deform_inputs2

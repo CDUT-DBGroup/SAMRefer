@@ -144,9 +144,19 @@ class ViTAdapter(nn.Module):
         # SPM forward
         c1, c2, c3, c4 = self.spm(x)
         adapter_feats = torch.cat([c2, c3, c4], dim=1) # [B, HW/8^2+HW/16^2+HW/32^2, D]
+        
+        # 从实际的特征图形状计算空间尺寸（而不是使用整数除法）
+        # c2, c3, c4 已经被 reshape 为 [B, N, D]，其中 N = H*W
+        # 由于特征图通常是正方形，使用 sqrt 计算空间尺寸
+        c2_h = c2_w = int(math.sqrt(c2.shape[1]))
+        c3_h = c3_w = int(math.sqrt(c3.shape[1]))
+        c4_h = c4_w = int(math.sqrt(c4.shape[1]))
+        actual_spatial_shapes = [(c2_h, c2_w), (c3_h, c3_w), (c4_h, c4_w)]
+        
         lvl_pos_emb = self._get_lvl_pos_embed(bs, H, W)
-        # Interaction
-        deform_inputs1, deform_inputs2 = deform_inputs(H, W, vit_h, vit_w, x.device)
+        # Interaction - 使用实际的特征图尺寸
+        deform_inputs1, deform_inputs2 = deform_inputs(H, W, vit_h, vit_w, x.device, 
+                                                        actual_spatial_shapes=actual_spatial_shapes)
         prompts = self.lang_prompts.weight.unsqueeze(0).expand(bs, -1, -1) # [B, P, C]
         for i, layer in enumerate(self.interactions):
             indexes = self.interaction_indexes[i]
