@@ -339,17 +339,53 @@ def main():
                 logger.info(f"Resuming from checkpoint: {resume_path}")
         else:
             logger.info(f"Resuming from checkpoint: {resume_path}")
-        # 实际上 load_checkpoint 只需要传父目录，deepspeed 会自动找最新 global_step
-        _, client_state = model_engine.load_checkpoint(resume_path)
-        # 处理 client_state 为 None 的情况（checkpoint 加载失败）
-        if client_state is not None:
-            start_epoch = client_state.get('epoch', 0)
-            best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
-            logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
-        else:
-            logger.warning(f"Failed to load checkpoint from {resume_path}, starting from epoch 0")
-            start_epoch = 0
-            best_iou_miou_sum = 0
+        
+        # 尝试加载检查点，如果 world_size 不匹配则只加载模型权重
+        try:
+            # 实际上 load_checkpoint 只需要传父目录，deepspeed 会自动找最新 global_step
+            _, client_state = model_engine.load_checkpoint(resume_path)
+            # 处理 client_state 为 None 的情况（checkpoint 加载失败）
+            if client_state is not None:
+                start_epoch = client_state.get('epoch', 0)
+                best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
+                logger.info(f"Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
+            else:
+                logger.warning(f"Failed to load checkpoint from {resume_path}, starting from epoch 0")
+                start_epoch = 0
+                best_iou_miou_sum = 0
+        except Exception as e:
+            error_msg = str(e)
+            # 检查是否是 world_size 不匹配的错误
+            if "world size" in error_msg.lower() or "ZeRO" in error_msg or "ZeRORuntimeException" in error_msg:
+                logger.warning(f"Checkpoint was saved with different world_size. Loading model weights only (skipping optimizer states)...")
+                logger.warning(f"Original error: {error_msg}")
+                try:
+                    # 只加载模型权重，不加载优化器状态和调度器状态
+                    _, client_state = model_engine.load_checkpoint(
+                        resume_path, 
+                        load_optimizer_states=False, 
+                        load_lr_scheduler_states=False
+                    )
+                    if client_state is not None:
+                        start_epoch = client_state.get('epoch', 0)
+                        best_iou_miou_sum = client_state.get('best_iou_miou_sum', 0)
+                        logger.info(f"Loaded model weights only. Resumed from epoch {start_epoch}, best_iou_miou_sum={best_iou_miou_sum}")
+                        logger.info("Note: Optimizer states were not loaded due to world_size mismatch. Training will continue with new optimizer states.")
+                    else:
+                        logger.warning(f"Failed to load checkpoint even without optimizer states, starting from epoch 0")
+                        start_epoch = 0
+                        best_iou_miou_sum = 0
+                except Exception as e2:
+                    logger.error(f"Failed to load checkpoint even without optimizer states: {e2}")
+                    logger.warning("Starting training from scratch...")
+                    start_epoch = 0
+                    best_iou_miou_sum = 0
+            else:
+                # 其他类型的错误
+                logger.error(f"Failed to load checkpoint: {e}")
+                logger.warning("Starting training from scratch...")
+                start_epoch = 0
+                best_iou_miou_sum = 0
     # broadcast resume info to all ranks
     start_epoch_tensor = torch.tensor([start_epoch], dtype=torch.int, device=device)
     best_iou_miou_sum_tensor = torch.tensor([best_iou_miou_sum], dtype=torch.float, device=device)
