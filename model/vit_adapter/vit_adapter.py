@@ -58,21 +58,22 @@ class ViTAdapter(nn.Module):
             for i in range(num_prompt_layers)
         ])
 
-        # 多尺度特征融合模块（用于vit_feats）
-        # 融合c2, c3, c4三个尺度的特征，提升vit_feats的质量
-        self.vit_feats_fusion = nn.Sequential(
+        # 改进：多尺度特征融合模块（用于mask_feature，更直接有效）
+        # mask_feature用于生成coarse_masks，作为SAM decoder的dense prompt，直接影响最终结果
+        # 融合c1, c2, c3三个尺度的特征，提升mask_feature的质量
+        self.mask_feature_fusion = nn.Sequential(
             nn.Conv2d(out_dim * 3, out_dim, kernel_size=3, padding=1, bias=False),
             nn.GroupNorm(1, out_dim, eps=1e-6),
             nn.GELU(),
             nn.Conv2d(out_dim, out_dim, kernel_size=1, bias=False),
             nn.GroupNorm(1, out_dim, eps=1e-6)
         )
-        self.vit_feats_fusion.apply(self._init_weights)
+        self.mask_feature_fusion.apply(self._init_weights)
         
-        # 可学习的残差连接系数（初始化为接近0，确保训练初期不影响预训练特征）
+        # 可学习的残差连接系数（初始化为接近0，确保训练初期不影响原始特征）
         # 使用sigmoid确保系数在(0, 1)范围内，初始值约为0.1
         # logit(0.1) ≈ -2.2，所以初始化为-2.2
-        self.vit_feats_fusion_alpha = nn.Parameter(torch.tensor(-2.2))
+        self.mask_feature_fusion_alpha = nn.Parameter(torch.tensor(-2.2))
 
         if with_deconv:
             self.c1_conv = nn.Conv2d(conv_inplane, out_dim, kernel_size=1, bias=False)
@@ -228,20 +229,29 @@ class ViTAdapter(nn.Module):
         vit_feats = vit_feats.permute(0, 3, 1, 2)
         vit_feats = self.vis_model.neck(vit_feats)  # [B, out_chans, h, w]
 
-        # 多尺度特征融合
-        # c2: [B, out_dim, h*2, w*2] -> 下采样到 [B, out_dim, h, w]
-        c2_resized = F.interpolate(c2, size=(h, w), mode='bilinear', align_corners=True)
-        # c3: [B, out_dim, h, w] -> 已经是正确尺寸
-        # c4: [B, out_dim, h//2, w//2] -> 上采样到 [B, out_dim, h, w]
-        c4_resized = F.interpolate(c4, size=(h, w), mode='bilinear', align_corners=True)
-
-        # 拼接并融合多尺度特征
-        multi_scale_feats = torch.cat([c2_resized, c3, c4_resized], dim=1)  # [B, out_dim*3, h, w]
-        fused_adapter_feats = self.vit_feats_fusion(multi_scale_feats)  # [B, out_dim, h, w]
-
-        # 残差连接融合到vit_feats（使用可学习系数控制融合强度）
+        # 改进：多尺度特征融合用于mask_feature（更直接有效）
+        # mask_feature用于生成coarse_masks，作为SAM decoder的dense prompt，直接影响最终结果
+        # 获取c1的尺寸（用于mask_feature）
+        c1_h, c1_w = adapter_feats_list[0].shape[-2:] if self.with_deconv else (h * 2, w * 2)
+        
+        # 将c2, c3上采样到c1的分辨率
+        c2_to_c1 = F.interpolate(c2, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
+        c3_to_c1 = F.interpolate(c3, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
+        
+        # 如果with_deconv，c1已经在adapter_feats_list[0]中
+        if self.with_deconv:
+            c1_feat = adapter_feats_list[0]
+        else:
+            # 如果没有deconv，需要从c2生成c1
+            c1_feat = F.interpolate(c2, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
+        
+        # 融合多尺度特征用于mask_feature
+        multi_scale_mask_feats = torch.cat([c1_feat, c2_to_c1, c3_to_c1], dim=1)  # [B, out_dim*3, c1_h, c1_w]
+        enhanced_mask_feature = self.mask_feature_fusion(multi_scale_mask_feats)  # [B, out_dim, c1_h, c1_w]
+        
+        # 残差连接融合到mask_feature（使用可学习系数控制融合强度）
         # 使用sigmoid确保系数在(0, 1)范围内，初始值约为0.1，训练过程中可学习最优值
-        alpha = torch.sigmoid(self.vit_feats_fusion_alpha)  # 初始值≈0.1，范围(0, 1)
-        vit_feats = vit_feats + alpha * fused_adapter_feats
+        alpha = torch.sigmoid(self.mask_feature_fusion_alpha)  # 初始值≈0.1，范围(0, 1)
+        adapter_feats_list[0] = adapter_feats_list[0] + alpha * enhanced_mask_feature
 
         return adapter_feats_list, vit_feats, lang_feats, all_prompts
