@@ -20,22 +20,6 @@ class ReferSAM(nn.Module):
                                           nn.GELU(), 
                                           nn.Linear(self.decoder_dim, self.decoder_dim))
         self.mask_scaling = nn.Conv2d(1, 1, kernel_size=1)
-        
-        # 改进：coarse_masks细化模块（提升coarse_masks质量）
-        # coarse_masks作为dense prompt，直接影响SAM decoder的最终输出
-        self.coarse_mask_refine = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(1, 16, eps=1e-6),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(16, 1, kernel_size=1, bias=False)
-        )
-        # 零初始化，确保初始时不影响原始coarse_masks
-        nn.init.zeros_(self.coarse_mask_refine[-1].weight)
-        if self.coarse_mask_refine[-1].bias is not None:
-            nn.init.zeros_(self.coarse_mask_refine[-1].bias)
-        
-        # 可学习的细化强度系数
-        self.coarse_mask_refine_alpha = nn.Parameter(torch.tensor(-2.2))  # 初始值≈0.1
         self.sparse_embedding = nn.Sequential(
                 nn.Linear(self.decoder_dim, self.decoder_dim),
                 nn.GELU(), 
@@ -137,14 +121,6 @@ class ReferSAM(nn.Module):
 
         dense_prompts = self.mask_embedding(dense_prompts)
         coarse_masks = torch.einsum('bqc,bchw->bqhw', dense_prompts, mask_feature) # [B, 1, H, W]
-        
-        # 改进：细化coarse_masks（提升质量）
-        # 使用轻量级卷积细化coarse_masks，去除噪声，增强边界
-        refined_coarse_masks = self.coarse_mask_refine(coarse_masks)  # [B, 1, H, W]
-        # 使用可学习系数控制细化强度，初始值约为0.1
-        refine_alpha = torch.sigmoid(self.coarse_mask_refine_alpha)  # 初始值≈0.1，范围(0, 1)
-        coarse_masks = coarse_masks + refine_alpha * refined_coarse_masks
-        
         mask_prompt = self.mask_scaling(coarse_masks)
 
         sparse_prompts = self.sparse_embedding(sparse_prompts)

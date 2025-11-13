@@ -15,7 +15,7 @@ class ViTAdapter(nn.Module):
     def __init__(self, vis_model, vis_dim, lang_dim, vl_dim, num_prompts=[10, 8], conv_inplane=64, n_points=4, deform_ratio=1.0, 
                  deform_num_heads=6, interaction_indexes=None, with_cffn=True, init_values=0.,
                  cffn_ratio=0.25, add_vit_feature=False, drop_path_rate=0., dropout=0.,
-                 with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=2, using_clip=True):
+                 with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=1, using_clip=True):
         
         super().__init__()
         self.using_clip = using_clip
@@ -53,28 +53,22 @@ class ViTAdapter(nn.Module):
         # 可学习的权重参数，用于组合基础token和加权聚合的文本特征
         # 初始化为接近原始权重0.7和0.3的值（通过logit空间：log(0.7/0.3) ≈ 0.85）
         self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
+        
+        # 改进：使用注意力机制聚合文本特征（替代简单的mean聚合）
+        # 使用query-key-value注意力，更好地理解文本语义
+        self.lang_attention = nn.MultiheadAttention(
+            embed_dim=out_dim, 
+            num_heads=8, 
+            dropout=0.1,
+            batch_first=True
+        )
+        self.lang_attention_query = nn.Parameter(torch.randn(1, 1, out_dim))  # 可学习的query
+        # 初始化query
+        nn.init.normal_(self.lang_attention_query, std=0.02)
         self.prompt_blocks = nn.Sequential(*[
             PromptAttnLayer(out_dim, out_dim, out_dim, heads=8, mlp_ratio=4, n_levels=3, norm_layer=partial(nn.LayerNorm, eps=1e-6)) 
             for i in range(num_prompt_layers)
         ])
-
-        # 改进：多尺度特征融合模块（用于mask_feature，更直接有效）
-        # mask_feature用于生成coarse_masks，作为SAM decoder的dense prompt，直接影响最终结果
-        # 融合c1和c3两个尺度的特征，提升mask_feature的质量
-        # 注意：c1已经包含了c2的信息（通过deconv融合），所以不再重复融合c2
-        self.mask_feature_fusion = nn.Sequential(
-            nn.Conv2d(out_dim * 2, out_dim, kernel_size=3, padding=1, bias=False),
-            nn.GroupNorm(1, out_dim, eps=1e-6),
-            nn.GELU(),
-            nn.Conv2d(out_dim, out_dim, kernel_size=1, bias=False),
-            nn.GroupNorm(1, out_dim, eps=1e-6)
-        )
-        self.mask_feature_fusion.apply(self._init_weights)
-        
-        # 可学习的残差连接系数（初始化为接近0，确保训练初期不影响原始特征）
-        # 使用sigmoid确保系数在(0, 1)范围内，初始值约为0.1
-        # logit(0.1) ≈ -2.2，所以初始化为-2.2
-        self.mask_feature_fusion_alpha = nn.Parameter(torch.tensor(-2.2))
 
         if with_deconv:
             self.c1_conv = nn.Conv2d(conv_inplane, out_dim, kernel_size=1, bias=False)
@@ -210,13 +204,20 @@ class ViTAdapter(nn.Module):
         else:
             lang_g_base = lang_feats[:, 0].unsqueeze(1)
 
-        # 使用注意力聚合所有token（更充分利用文本信息）
-        text_attn_weights = F.softmax(lang_feats.mean(-1), dim=1)  # [B, N_l]
-        lang_g_weighted = (lang_feats * text_attn_weights.unsqueeze(-1)).sum(1).unsqueeze(1)  # [B, 1, C]
+        # 改进：使用注意力机制聚合文本特征（替代简单的mean聚合）
+        # 使用可学习的query，更好地理解文本语义
+        lang_query = self.lang_attention_query.expand(bs, -1, -1)  # [B, 1, out_dim]
+        lang_g_attn, _ = self.lang_attention(
+            query=lang_query,
+            key=lang_feats,
+            value=lang_feats,
+            key_padding_mask=(1 - lang_mask).bool() if lang_mask is not None else None
+        )  # [B, 1, out_dim]
+        lang_g_attn = lang_g_attn.squeeze(1).unsqueeze(1)  # [B, 1, out_dim]
 
-        # 结合基础token和加权聚合（使用可学习权重）
+        # 结合基础token和注意力聚合（使用可学习权重）
         fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
-        lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_weighted
+        lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_attn
 
         dense_prompts = lang_g  # 不需要detach，也不需要clone（因为后面会concat）
         sparse_prompts = self.sparse_prompts.weight.unsqueeze(0).expand(bs, -1, -1) # [B, P, C]
@@ -229,30 +230,5 @@ class ViTAdapter(nn.Module):
         # ViT neck
         vit_feats = vit_feats.permute(0, 3, 1, 2)
         vit_feats = self.vis_model.neck(vit_feats)  # [B, out_chans, h, w]
-
-        # 改进：多尺度特征融合用于mask_feature（更直接有效）
-        # mask_feature用于生成coarse_masks，作为SAM decoder的dense prompt，直接影响最终结果
-        # 获取c1的尺寸（用于mask_feature）
-        c1_h, c1_w = adapter_feats_list[0].shape[-2:] if self.with_deconv else (h * 2, w * 2)
-        
-        # 将c3上采样到c1的分辨率
-        # 注意：c1已经包含了c2的信息（通过deconv融合），所以不再重复融合c2
-        c3_to_c1 = F.interpolate(c3, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
-        
-        # 如果with_deconv，c1已经在adapter_feats_list[0]中
-        if self.with_deconv:
-            c1_feat = adapter_feats_list[0]
-        else:
-            # 如果没有deconv，需要从c2生成c1
-            c1_feat = F.interpolate(c2, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
-        
-        # 融合多尺度特征用于mask_feature（只融合c1和c3，避免c2重复）
-        multi_scale_mask_feats = torch.cat([c1_feat, c3_to_c1], dim=1)  # [B, out_dim*2, c1_h, c1_w]
-        enhanced_mask_feature = self.mask_feature_fusion(multi_scale_mask_feats)  # [B, out_dim, c1_h, c1_w]
-        
-        # 残差连接融合到mask_feature（使用可学习系数控制融合强度）
-        # 使用sigmoid确保系数在(0, 1)范围内，初始值约为0.1，训练过程中可学习最优值
-        alpha = torch.sigmoid(self.mask_feature_fusion_alpha)  # 初始值≈0.1，范围(0, 1)
-        adapter_feats_list[0] = adapter_feats_list[0] + alpha * enhanced_mask_feature
 
         return adapter_feats_list, vit_feats, lang_feats, all_prompts

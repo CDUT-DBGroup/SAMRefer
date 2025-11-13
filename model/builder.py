@@ -42,7 +42,7 @@ def _segm_refersam(pretrained, args, criterion):
         'vl_dim': sam_configs[args.sam_type]["vl_dim"],
         'num_prompts': [16, 4],
         'num_extra_layers': 2,
-        "num_prompt_layers": 2,
+        "num_prompt_layers": 1,  # 减少层数：从2层减到1层，减少与VLBiAttnLayer的冗余
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     if pretrained is True:
