@@ -68,6 +68,11 @@ class ViTAdapter(nn.Module):
             nn.GroupNorm(1, out_dim, eps=1e-6)
         )
         self.vit_feats_fusion.apply(self._init_weights)
+        
+        # 可学习的残差连接系数（初始化为接近0，确保训练初期不影响预训练特征）
+        # 使用sigmoid确保系数在(0, 1)范围内，初始值约为0.1
+        # logit(0.1) ≈ -2.2，所以初始化为-2.2
+        self.vit_feats_fusion_alpha = nn.Parameter(torch.tensor(-2.2))
 
         if with_deconv:
             self.c1_conv = nn.Conv2d(conv_inplane, out_dim, kernel_size=1, bias=False)
@@ -234,7 +239,9 @@ class ViTAdapter(nn.Module):
         multi_scale_feats = torch.cat([c2_resized, c3, c4_resized], dim=1)  # [B, out_dim*3, h, w]
         fused_adapter_feats = self.vit_feats_fusion(multi_scale_feats)  # [B, out_dim, h, w]
 
-        # 残差连接融合到vit_feats
-        vit_feats = vit_feats + fused_adapter_feats
+        # 残差连接融合到vit_feats（使用可学习系数控制融合强度）
+        # 使用sigmoid确保系数在(0, 1)范围内，初始值约为0.1，训练过程中可学习最优值
+        alpha = torch.sigmoid(self.vit_feats_fusion_alpha)  # 初始值≈0.1，范围(0, 1)
+        vit_feats = vit_feats + alpha * fused_adapter_feats
 
         return adapter_feats_list, vit_feats, lang_feats, all_prompts
