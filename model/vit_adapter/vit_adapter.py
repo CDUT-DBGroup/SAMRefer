@@ -60,9 +60,10 @@ class ViTAdapter(nn.Module):
 
         # 改进：多尺度特征融合模块（用于mask_feature，更直接有效）
         # mask_feature用于生成coarse_masks，作为SAM decoder的dense prompt，直接影响最终结果
-        # 融合c1, c2, c3三个尺度的特征，提升mask_feature的质量
+        # 融合c1和c3两个尺度的特征，提升mask_feature的质量
+        # 注意：c1已经包含了c2的信息（通过deconv融合），所以不再重复融合c2
         self.mask_feature_fusion = nn.Sequential(
-            nn.Conv2d(out_dim * 3, out_dim, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(out_dim * 2, out_dim, kernel_size=3, padding=1, bias=False),
             nn.GroupNorm(1, out_dim, eps=1e-6),
             nn.GELU(),
             nn.Conv2d(out_dim, out_dim, kernel_size=1, bias=False),
@@ -234,8 +235,8 @@ class ViTAdapter(nn.Module):
         # 获取c1的尺寸（用于mask_feature）
         c1_h, c1_w = adapter_feats_list[0].shape[-2:] if self.with_deconv else (h * 2, w * 2)
         
-        # 将c2, c3上采样到c1的分辨率
-        c2_to_c1 = F.interpolate(c2, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
+        # 将c3上采样到c1的分辨率
+        # 注意：c1已经包含了c2的信息（通过deconv融合），所以不再重复融合c2
         c3_to_c1 = F.interpolate(c3, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
         
         # 如果with_deconv，c1已经在adapter_feats_list[0]中
@@ -245,8 +246,8 @@ class ViTAdapter(nn.Module):
             # 如果没有deconv，需要从c2生成c1
             c1_feat = F.interpolate(c2, size=(c1_h, c1_w), mode='bilinear', align_corners=True)
         
-        # 融合多尺度特征用于mask_feature
-        multi_scale_mask_feats = torch.cat([c1_feat, c2_to_c1, c3_to_c1], dim=1)  # [B, out_dim*3, c1_h, c1_w]
+        # 融合多尺度特征用于mask_feature（只融合c1和c3，避免c2重复）
+        multi_scale_mask_feats = torch.cat([c1_feat, c3_to_c1], dim=1)  # [B, out_dim*2, c1_h, c1_w]
         enhanced_mask_feature = self.mask_feature_fusion(multi_scale_mask_feats)  # [B, out_dim, c1_h, c1_w]
         
         # 残差连接融合到mask_feature（使用可学习系数控制融合强度）
