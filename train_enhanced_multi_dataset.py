@@ -730,7 +730,7 @@ if __name__ == '__main__':
     mp.set_start_method('fork', force=True)
     try:
         main()
-        evaluate_four_datasets()
+        # evaluate_four_datasets()
     except Exception as e:
         import traceback
         print(f"训练过程中发生错误: {e}")

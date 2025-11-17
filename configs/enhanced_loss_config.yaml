@@ -30,9 +30,9 @@ adaptive_temperature: 1.5  # 自适应权重的温度参数，控制权重分布
 use_curriculum_learning: true  # 是否使用课程学习
 curriculum_schedule:
   focal_start_epoch: 2    # Focal loss开始使用的epoch
-  iou_start_epoch: 3      # IoU loss开始使用的epoch
-  boundary_start_epoch: 4 # Boundary loss开始使用的epoch
-  full_weight_epoch: 8    # 所有loss达到完整权重的epoch
+  iou_start_epoch: 8      # IoU loss开始使用的epoch
+  boundary_start_epoch: 15 # Boundary loss开始使用的epoch
+  full_weight_epoch: 20    # 所有loss达到完整权重的epoch
 
 # Dataset-aware loss parameters - 数据集感知损失参数
 use_dataset_aware_loss: true  # 是否使用数据集感知损失
@@ -40,7 +40,8 @@ dataset_weights:
   refcoco: 1.0           # RefCOCO数据集权重
   refcoco+: 1.0          # RefCOCO+数据集权重
   refcocog: 1.0          # RefCOCOg数据集权重
-  ref-zom: 0.8           # Ref-ZOM数据集权重（相对较难）
+  ref-zom: 1.0           # Ref-ZOM数据集权重（相对较难）
+  grefcoco: 1.0          # GRefCOCO数据集权重
 
 # Point sampling parameters (inherited from original) - 点采样参数
 num_points: 12544        # 112*112
