@@ -143,6 +143,12 @@ while kill -0 $TRAIN_PID 2>/dev/null; do
     
     # 检查是否超过最大训练时间
     if [ $elapsed_time -ge $MAX_TRAINING_TIME ]; then
+        deepspeed --num_gpus $NUM_GPUS validate_bert.py \
+            --deepspeed_config configs/ds_config.json \
+            --config configs/main_refersam_bert.yaml \
+            --use_enhanced_loss \
+            --loss_config_path configs/enhanced_loss_config.yaml \
+            > validate_$(date +%m%d_%H%M).log 2>&1 &
         echo "Training exceeded maximum time limit (${MAX_TRAINING_TIME}s). Killing process..."
         kill -TERM $TRAIN_PID 2>/dev/null
         sleep 5

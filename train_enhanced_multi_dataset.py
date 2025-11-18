@@ -191,70 +191,70 @@ def main():
     )
     
     # RefCOCO+
-    train_dataset_refcocoplus = MultiDatasetWrapper(
-        ReferDataset(
-            refer_data_root=args.data_root,
-            dataset='refcoco+',
-            splitBy='unc',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'refcoco+'
-    )
+    # train_dataset_refcocoplus = MultiDatasetWrapper(
+    #     ReferDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='refcoco+',
+    #         splitBy='unc',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'refcoco+'
+    # )
     
-    # RefCOCOg
-    train_dataset_refcocog = MultiDatasetWrapper(
-        ReferDataset(
-            refer_data_root=args.data_root,
-            dataset='refcocog',
-            splitBy='umd',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'refcocog'
-    )
+    # # RefCOCOg
+    # train_dataset_refcocog = MultiDatasetWrapper(
+    #     ReferDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='refcocog',
+    #         splitBy='umd',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'refcocog'
+    # )
     
-    # Ref-ZOM
-    train_dataset_zom = MultiDatasetWrapper(
-        ReferzomDataset(
-            refer_data_root=args.data_root,
-            dataset='ref-zom',
-            splitBy='final',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'ref-zom'
-    )
+    # # Ref-ZOM
+    # train_dataset_zom = MultiDatasetWrapper(
+    #     ReferzomDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='ref-zom',
+    #         splitBy='final',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'ref-zom'
+    # )
 
-    train_dataset_gref = MultiDatasetWrapper(
-        GRefDataset(
-            refer_data_root=args.data_root,
-            dataset='grefcoco',
-            splitBy='unc',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'grefcoco'
-    )
+    # train_dataset_gref = MultiDatasetWrapper(
+    #     GRefDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='grefcoco',
+    #         splitBy='unc',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'grefcoco'
+    # )
     # 合并所有训练数据集
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_refcocog,
-        train_dataset_zom,
-        train_dataset_gref,
+        # train_dataset_refcocog,
+        # train_dataset_zom,
+        # train_dataset_gref,
         train_dataset_coco,
-        train_dataset_refcocoplus
+        # train_dataset_refcocoplus
     ])
     
     # 验证数据集（使用RefCOCO）
