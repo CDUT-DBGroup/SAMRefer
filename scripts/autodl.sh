@@ -18,10 +18,10 @@ conda activate SAM
 # 设置随机种子
 export PYTHONHASHSEED=123456
 NUM_GPUS=1
-export FILELOCK_DEFAULT_CLASS=SoftFileLock
+# export FILELOCK_DEFAULT_CLASS=SoftFileLock
 
 # 启动多数据集训练
-export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
+# export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 
 # 记录日志文件名
 LOG_FILE="train_multi_dataset_$(date +%m%d_%H%M).log"

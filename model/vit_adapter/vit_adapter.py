@@ -45,6 +45,13 @@ class ViTAdapter(nn.Module):
                                           nn.GELU(), 
                                           nn.Linear(out_dim, out_dim),
                                           nn.LayerNorm(out_dim, eps=1e-6))
+        
+        # 多尺度特征融合模块
+        self.multi_scale_fusion = MultiScaleFusion(dim=out_dim, num_scales=3, num_heads=8, dropout=dropout)
+        
+        # 增强的c1和c2融合模块
+        if with_deconv:
+            self.c1c2_fusion = EnhancedC1C2Fusion(dim=out_dim, dropout=dropout)
 
         self.sparse_prompts = nn.Embedding(num_prompts[1], out_dim)
         self.prompt_pos = nn.Embedding(1+num_prompts[1], out_dim)
@@ -87,6 +94,10 @@ class ViTAdapter(nn.Module):
         self.prompt_blocks.apply(self._init_weights)
         self.adapter_proj.apply(self._init_weights)
         self.lang_proj.apply(self._init_weights)
+        if hasattr(self, 'multi_scale_fusion'):
+            self.multi_scale_fusion.apply(self._init_weights)
+        if hasattr(self, 'c1c2_fusion'):
+            self.c1c2_fusion.apply(self._init_weights)
         self.apply(self._init_deform_weights)
         normal_(self.level_embed)
         normal_(self.level_embed_prompter)
@@ -110,24 +121,23 @@ class ViTAdapter(nn.Module):
         if isinstance(m, MultiScaleDeformableAttention):
             m.init_weights() # init_weights defined in MultiScaleDeformableAttention
 
-    def _get_lvl_pos_embed(self, B, H, W):
-        dtype = self.level_embed.dtype
+    def _get_lvl_pos_embed(self, B, H, W, level_embed, pos_encoding):
+        """
+        统一的位置编码函数，减少代码重复
+        Args:
+            B: batch size
+            H, W: 输入图像的高度和宽度
+            level_embed: 可学习的层级嵌入 [3, D]
+            pos_encoding: 位置编码器
+        Returns:
+            lvl_pos_emb: [B, sum(N_i), D] 位置编码
+        """
+        dtype = level_embed.dtype
         lvl_pos_emb_list = []
         for i in range(3):
             r = 2 ** (i + 3)
-            pos_embed = self.postional_encoding(self.level_embed.new_zeros((B, H//r, W//r), dtype=torch.bool)).to(dtype)
-            curr_lvl_pos_emb = self.level_embed[i] + pos_embed.flatten(2).permute(0, 2, 1)
-            lvl_pos_emb_list.append(curr_lvl_pos_emb)
-        lvl_pos_emb = torch.cat(lvl_pos_emb_list, dim=1)
-        return lvl_pos_emb
-    
-    def _get_lvl_pos_embed_prompter(self, B, H, W):
-        dtype = self.level_embed_prompter.dtype
-        lvl_pos_emb_list = []
-        for i in range(3):
-            r = 2 ** (i + 3)
-            pos_embed = self.postional_encoding_prompter(self.level_embed_prompter.new_zeros((B, H//r, W//r), dtype=torch.bool)).to(dtype)
-            curr_lvl_pos_emb = self.level_embed_prompter[i] + pos_embed.flatten(2).permute(0, 2, 1)
+            pos_embed = pos_encoding(level_embed.new_zeros((B, H//r, W//r), dtype=torch.bool)).to(dtype)
+            curr_lvl_pos_emb = level_embed[i] + pos_embed.flatten(2).permute(0, 2, 1)
             lvl_pos_emb_list.append(curr_lvl_pos_emb)
         lvl_pos_emb = torch.cat(lvl_pos_emb_list, dim=1)
         return lvl_pos_emb
@@ -154,7 +164,7 @@ class ViTAdapter(nn.Module):
         c4_h = c4_w = int(math.sqrt(c4.shape[1]))
         actual_spatial_shapes = [(c2_h, c2_w), (c3_h, c3_w), (c4_h, c4_w)]
         
-        lvl_pos_emb = self._get_lvl_pos_embed(bs, H, W)
+        lvl_pos_emb = self._get_lvl_pos_embed(bs, H, W, self.level_embed, self.postional_encoding)
         # Interaction - 使用实际的特征图尺寸
         deform_inputs1, deform_inputs2 = deform_inputs(H, W, vit_h, vit_w, x.device, 
                                                         actual_spatial_shapes=actual_spatial_shapes)
@@ -174,20 +184,29 @@ class ViTAdapter(nn.Module):
         c2 = self.adapter_proj[0](c2)
         c3 = self.adapter_proj[1](c3)
         c4 = self.adapter_proj[2](c4)
+        
+        # 使用多尺度融合模块增强特征
+        feats_list = [c2, c3, c4]
+        enhanced_feats_list = self.multi_scale_fusion(feats_list)  # List of [B, N_i, D]
+        # 更新c2, c3, c4为增强后的特征
+        c2, c3, c4 = enhanced_feats_list
+        # 拼接用于后续处理
         adapter_feats = torch.cat([c2, c3, c4], dim=1)
 
         c2 = c2.transpose(1, 2).view(bs, -1, h * 2, w * 2).contiguous() # 1/8
         c3 = c3.transpose(1, 2).view(bs, -1, h, w).contiguous() # 1/16
         c4 = c4.transpose(1, 2).view(bs, -1, h // 2, w // 2).contiguous() # 1/32
         adapter_feats_list = [c2, c3, c4]
+        
         if self.with_deconv:
             c1 = self.c1_norm(self.c1_conv(c1))
-            c1 = c1 + F.interpolate(c2.float(), size=c1.shape[-2:], mode='bilinear', align_corners=False).to(c1.dtype) # 1/4
+            # 使用增强的c1c2融合模块替代简单的上采样相加
+            c1 = self.c1c2_fusion(c1, c2)  # [B, C, H1, W1]
             c1 = self.out_conv(c1)
             adapter_feats_list = [c1,] + adapter_feats_list
 
         # Prompt aggregation
-        lvl_pos_emb_prompter = self._get_lvl_pos_embed_prompter(bs, H, W)
+        lvl_pos_emb_prompter = self._get_lvl_pos_embed(bs, H, W, self.level_embed_prompter, self.postional_encoding_prompter)
         # if self.using_clip:
         #     eos_index = lang_mask.sum(1).long() - 1
         #     lang_g = lang_feats[torch.arange(bs), eos_index].unsqueeze(1) # [B, 1, C], [EOS] embeddings

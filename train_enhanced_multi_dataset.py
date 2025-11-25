@@ -191,19 +191,19 @@ def main():
     )
     
     # RefCOCO+
-    train_dataset_refcocoplus = MultiDatasetWrapper(
-        ReferDataset(
-            refer_data_root=args.data_root,
-            dataset='refcoco+',
-            splitBy='unc',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'refcoco+'
-    )
+    # train_dataset_refcocoplus = MultiDatasetWrapper(
+    #     ReferDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='refcoco+',
+    #         splitBy='unc',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'refcoco+'
+    # )
     
     # # RefCOCOg
     # train_dataset_refcocog = MultiDatasetWrapper(

@@ -2,6 +2,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint as cp
 from mmcv.ops.multi_scale_deform_attn import MultiScaleDeformableAttention
 from timm.models.layers import DropPath
@@ -320,3 +321,180 @@ class InteractionBlock(nn.Module):
                                                                                  reference_points=deform_inputs2[0], spatial_shapes=deform_inputs1[1], level_start_index=deform_inputs1[2], vis_pos=lvl_pos_emb)
 
         return vit_feats, adapter_feats, lang_feats, prompts
+
+
+class MultiScaleFusion(nn.Module):
+    """
+    增强的多尺度特征融合模块
+    使用跨尺度注意力和可学习权重进行智能融合
+    注意：这个模块主要用于增强特征，最终仍然返回拼接后的特征以保持兼容性
+    """
+    def __init__(self, dim, num_scales=3, num_heads=8, dropout=0.1):
+        super().__init__()
+        self.num_scales = num_scales
+        self.dim = dim
+        
+        # 跨尺度注意力机制 - 每个尺度都能关注其他尺度
+        self.cross_scale_attns = nn.ModuleList([
+            nn.MultiheadAttention(dim, num_heads=num_heads, dropout=dropout, batch_first=True)
+            for _ in range(num_scales)
+        ])
+        
+        # 可学习的尺度权重
+        self.scale_weights = nn.Parameter(torch.ones(num_scales))
+        
+        # 特征增强（对每个尺度独立增强）
+        self.enhance_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(dim, dim),
+                nn.LayerNorm(dim, eps=1e-6),
+                nn.GELU(),
+                nn.Dropout(dropout),
+                nn.Linear(dim, dim)
+            ) for _ in range(num_scales)
+        ])
+        
+        # 残差连接的权重
+        self.residual_weights = nn.Parameter(torch.ones(num_scales))
+        
+    def forward(self, feats_list):
+        """
+        Args:
+            feats_list: List of [B, N_i, D] tensors, where N_i is the number of tokens at scale i
+        Returns:
+            enhanced_feats_list: List of enhanced features, same structure as input
+        Note: 这个模块增强每个尺度的特征，但保持原始结构不变
+        """
+        enhanced_feats = []
+        
+        for i, feat in enumerate(feats_list):
+            # 1. 跨尺度注意力融合
+            other_feats = [feats_list[j] for j in range(len(feats_list)) if j != i]
+            if len(other_feats) > 0:
+                # 将其他尺度特征拼接
+                other_feats_cat = torch.cat(other_feats, dim=1)  # [B, sum(N_j), D]
+                # 跨尺度注意力
+                attn_out, _ = self.cross_scale_attns[i](
+                    query=feat,
+                    key=other_feats_cat,
+                    value=other_feats_cat
+                )
+                # 残差连接
+                enhanced_feat = feat + self.residual_weights[i] * attn_out
+            else:
+                enhanced_feat = feat
+            
+            # 2. 特征增强
+            enhanced_feat = enhanced_feat + self.enhance_layers[i](enhanced_feat)
+            
+            enhanced_feats.append(enhanced_feat)
+        
+        # 3. 可学习权重加权（可选，这里我们保持原始特征，只在需要时加权）
+        # scale_weights_norm = torch.softmax(self.scale_weights, dim=0)
+        # weighted_feats = [feat * weight for feat, weight in zip(enhanced_feats, scale_weights_norm)]
+        
+        # 返回增强后的特征列表（保持原始结构）
+        # 注意：为了保持兼容性，我们仍然需要返回拼接后的特征
+        # 但这里我们增强每个尺度后再拼接
+        return enhanced_feats
+
+
+class EnhancedC1C2Fusion(nn.Module):
+    """
+    增强的c1和c2融合模块
+    使用空间注意力和门控融合替代简单的上采样相加
+    注意：使用空间注意力而非序列注意力，避免内存爆炸
+    """
+    def __init__(self, dim, dropout=0.1):
+        super().__init__()
+        self.dim = dim
+        
+        # 使用空间注意力（Channel Attention + Spatial Attention）替代序列注意力
+        # 这样可以避免对256x256的特征做65536x65536的注意力矩阵计算
+        
+        # Channel Attention: 关注哪些通道更重要
+        self.channel_attention = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(dim * 2, dim // 4, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(dim // 4, dim, kernel_size=1),
+            nn.Sigmoid()
+        )
+        
+        # Spatial Attention: 使用轻量级卷积注意力
+        self.spatial_attention = nn.Sequential(
+            nn.Conv2d(dim * 2, dim, kernel_size=7, padding=3, groups=dim),
+            nn.GroupNorm(1, dim),
+            nn.Sigmoid()
+        )
+        
+        # c2特征增强（用于更好的融合）
+        self.c2_enhance = nn.Sequential(
+            nn.Conv2d(dim, dim, kernel_size=3, padding=1, groups=dim, bias=False),
+            nn.GroupNorm(1, dim),
+            nn.GELU(),
+            nn.Conv2d(dim, dim, kernel_size=1, bias=False)
+        )
+        
+        # 门控融合机制
+        self.gate = nn.Sequential(
+            nn.Conv2d(dim * 2, dim, kernel_size=1),
+            nn.GroupNorm(1, dim),
+            nn.Sigmoid()
+        )
+        
+        # 特征增强（轻量级，避免与out_conv重复）
+        # 注意：out_conv 已经有完整的特征处理，这里只做轻量级增强
+        self.enhance = nn.Sequential(
+            nn.Conv2d(dim, dim, kernel_size=3, padding=1, groups=dim, bias=False),
+            nn.GroupNorm(1, dim),
+            nn.GELU()
+            # 移除最后的 Conv2d，避免与 out_conv 重复
+        )
+        
+        # 可学习的融合权重
+        self.fusion_weight = nn.Parameter(torch.tensor([0.5, 0.5]))
+        
+    def forward(self, c1, c2):
+        """
+        Args:
+            c1: [B, C, H1, W1] - 1/4尺度特征
+            c2: [B, C, H2, W2] - 1/8尺度特征，需要上采样到c1的尺寸
+        Returns:
+            fused_c1: [B, C, H1, W1] - 融合后的特征
+        """
+        B, C, H1, W1 = c1.shape
+        _, _, H2, W2 = c2.shape
+        
+        # 1. 将c2上采样到c1的尺寸
+        c2_up = F.interpolate(c2.float(), size=(H1, W1), mode='bilinear', align_corners=False).to(c1.dtype)
+        
+        # 2. 增强c2特征
+        c2_enhanced = self.c2_enhance(c2_up)
+        
+        # 3. 使用空间注意力机制融合（避免序列注意力的内存问题）
+        concat_feat = torch.cat([c1, c2_enhanced], dim=1)  # [B, 2*C, H1, W1]
+        
+        # Channel Attention: 关注重要通道
+        channel_attn = self.channel_attention(concat_feat)  # [B, C, 1, 1]
+        c1_channel = c1 * channel_attn
+        c2_channel = c2_enhanced * channel_attn
+        
+        # Spatial Attention: 关注重要空间位置
+        spatial_attn = self.spatial_attention(concat_feat)  # [B, C, H1, W1]
+        c1_spatial = c1_channel * spatial_attn
+        c2_spatial = c2_channel * spatial_attn
+        
+        # 4. 加权融合
+        fusion_weights = F.softmax(self.fusion_weight, dim=0)
+        fused = fusion_weights[0] * c1_spatial + fusion_weights[1] * c2_spatial
+        
+        # 5. 门控融合
+        gate = self.gate(concat_feat)  # [B, C, H1, W1]
+        fused = fused * gate + c1 * (1 - gate)  # 门控残差连接
+        
+        # 6. 轻量级特征增强（主要增强细节，最终处理由out_conv完成）
+        enhanced = self.enhance(fused)
+        fused_c1 = fused + 0.5 * enhanced  # 使用较小的权重，避免与out_conv重复处理
+        
+        return fused_c1
