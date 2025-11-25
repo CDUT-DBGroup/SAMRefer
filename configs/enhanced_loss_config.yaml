@@ -30,9 +30,9 @@ adaptive_temperature: 1.5  # 自适应权重的温度参数，控制权重分布
 use_curriculum_learning: true  # 是否使用课程学习
 curriculum_schedule:
   focal_start_epoch: 2    # Focal loss开始使用的epoch
-  iou_start_epoch: 5      # IoU loss开始使用的epoch（提前以增加增长期）
-  boundary_start_epoch: 10 # Boundary loss开始使用的epoch（提前以增加增长期）
-  full_weight_epoch: 18    # 所有loss达到完整权重的epoch（提前以增加完整权重使用期）
+  iou_start_epoch: 8      # IoU loss开始使用的epoch（提前以增加增长期）
+  boundary_start_epoch: 15 # Boundary loss开始使用的epoch（提前以增加增长期）
+  full_weight_epoch: 20    # 所有loss达到完整权重的epoch（提前以增加完整权重使用期）
 
 # Dataset-aware loss parameters - 数据集感知损失参数
 use_dataset_aware_loss: true  # 是否使用数据集感知损失
