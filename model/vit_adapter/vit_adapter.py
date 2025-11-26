@@ -61,6 +61,9 @@ class ViTAdapter(nn.Module):
         # 初始化为接近原始权重0.7和0.3的值（通过logit空间：log(0.7/0.3) ≈ 0.85）
         self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
         
+        # vit_feats与c3融合的可学习权重（用于提升oIoU）
+        self.vit_c3_fusion_weight = nn.Parameter(torch.tensor(0.3))
+        
         # 改进：使用注意力机制聚合文本特征（替代简单的mean聚合）
         # 使用query-key-value注意力，更好地理解文本语义
         self.lang_attention = nn.MultiheadAttention(
@@ -249,5 +252,13 @@ class ViTAdapter(nn.Module):
         # ViT neck
         vit_feats = vit_feats.permute(0, 3, 1, 2)
         vit_feats = self.vis_model.neck(vit_feats)  # [B, out_chans, h, w]
+        
+        # 融合c3特征到vit_feats（参考11.9号版本，有助于提升oIoU）
+        # 使用可学习的融合权重，避免硬编码
+        if not hasattr(self, 'vit_c3_fusion_weight'):
+            self.vit_c3_fusion_weight = nn.Parameter(torch.tensor(0.3))  # 初始权重较小，避免过度影响
+        # 确保c3的尺寸与vit_feats匹配
+        if c3.shape[-2:] == vit_feats.shape[-2:]:
+            vit_feats = vit_feats + self.vit_c3_fusion_weight * c3
 
         return adapter_feats_list, vit_feats, lang_feats, all_prompts

@@ -354,8 +354,16 @@ class MultiScaleFusion(nn.Module):
             ) for _ in range(num_scales)
         ])
         
-        # 残差连接的权重
-        self.residual_weights = nn.Parameter(torch.ones(num_scales))
+        # 残差连接的权重（初始化为较小值，避免过度平滑）
+        self.residual_weights = nn.Parameter(torch.ones(num_scales) * 0.3)
+        
+        # 边界保护机制：使用门控控制融合强度
+        self.boundary_gates = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(dim, dim),
+                nn.Sigmoid()
+            ) for _ in range(num_scales)
+        ])
         
     def forward(self, feats_list):
         """
@@ -368,7 +376,7 @@ class MultiScaleFusion(nn.Module):
         enhanced_feats = []
         
         for i, feat in enumerate(feats_list):
-            # 1. 跨尺度注意力融合
+            # 1. 跨尺度注意力融合（使用门控保护边界信息）
             other_feats = [feats_list[j] for j in range(len(feats_list)) if j != i]
             if len(other_feats) > 0:
                 # 将其他尺度特征拼接
@@ -379,13 +387,16 @@ class MultiScaleFusion(nn.Module):
                     key=other_feats_cat,
                     value=other_feats_cat
                 )
-                # 残差连接
+                # 使用门控控制融合强度，保护原始特征（特别是边界信息）
+                gate = self.boundary_gates[i](feat.mean(dim=1, keepdim=True))  # [B, 1, D]
+                attn_out = attn_out * gate
+                # 残差连接（使用较小的权重，避免过度平滑）
                 enhanced_feat = feat + self.residual_weights[i] * attn_out
             else:
                 enhanced_feat = feat
             
-            # 2. 特征增强
-            enhanced_feat = enhanced_feat + self.enhance_layers[i](enhanced_feat)
+            # 2. 特征增强（使用较小的权重，避免过度修改）
+            enhanced_feat = enhanced_feat + 0.5 * self.enhance_layers[i](enhanced_feat)
             
             enhanced_feats.append(enhanced_feat)
         

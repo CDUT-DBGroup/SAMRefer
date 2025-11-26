@@ -18,9 +18,9 @@ boundary_kernel_size: 3  # 边界检测核大小
 loss_scaling_factors:
   ce: 2.0                # 交叉熵损失缩放因子（提高影响）
   dice: 1.5              # Dice损失缩放因子（提高影响）
-  focal: 1.0             # Focal损失缩放因子
-  iou: 0.8               # IoU损失缩放因子（提高影响）
-  boundary: 0.3          # 边界损失缩放因子（降低主导效应）
+  focal: 0.8             # Focal损失缩放因子
+  iou: 1.2               # IoU损失缩放因子（提高影响）
+  boundary: 0.5         # 边界损失缩放因子（降低主导效应）
 
 # Adaptive weighting parameters - 自适应权重参数
 adaptive_init_weights: [1.0, 1.0, 0.5, 0.3, 0.2]  # [ce, dice, focal, iou, boundary]初始权重
@@ -40,8 +40,8 @@ dataset_weights:
   refcoco: 1.0           # RefCOCO数据集权重
   refcoco+: 1.0          # RefCOCO+数据集权重
   refcocog: 1.0          # RefCOCOg数据集权重
-  ref-zom: 1.0           # Ref-ZOM数据集权重（相对较难）
-  grefcoco: 1.0          # GRefCOCO数据集权重
+  ref-zom: 1.2          # Ref-ZOM数据集权重（相对较难）
+  grefcoco: 0.9          # GRefCOCO数据集权重
 
 # Point sampling parameters (inherited from original) - 点采样参数
 num_points: 12544        # 112*112
