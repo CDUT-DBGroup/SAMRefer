@@ -10,7 +10,7 @@ export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 # 激活conda环境
-source ~/anaconda3/etc/profile.d/conda.sh
+source ~/conda.env
 # source ~/miniconda3/etc/profile.d/conda.sh
 conda activate ovseg_lower_pytorch
 # conda activate SAM
