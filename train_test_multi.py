@@ -34,6 +34,8 @@ from deepspeed.ops.adam import DeepSpeedCPUAdam
 import json
 import shutil
 import argparse
+torch.set_num_threads(16)
+torch.set_num_interop_threads(16)
 
 # 内存优化设置
 torch.backends.cudnn.benchmark = True
