@@ -6,11 +6,12 @@ This directory contains professional model architecture diagrams for Enhanced Re
 
 All diagrams are saved in `draw/img/`:
 
-1. **overall_architecture.png** - Complete Enhanced ReferSAM architecture
-2. **multiscale_fusion.png** - MultiScale Fusion module details
-3. **c1c2_fusion.png** - Enhanced C1C2 Fusion module details
-4. **text_attention.png** - Text Attention Aggregation module details
-5. **enhanced_loss.png** - Enhanced Loss Functions module details
+1. **comprehensive_architecture.png** - ⭐ **Recommended for Paper Main Figure** - Complete Enhanced ReferSAM architecture with detailed Enhanced Loss Functions module integrated
+2. **overall_architecture.png** - Complete Enhanced ReferSAM architecture (simplified version)
+3. **multiscale_fusion.png** - MultiScale Fusion module details
+4. **c1c2_fusion.png** - Enhanced C1C2 Fusion module details
+5. **text_attention.png** - Text Attention Aggregation module details
+6. **enhanced_loss.png** - Enhanced Loss Functions module details (standalone)
 
 ## Design Features
 
@@ -30,9 +31,17 @@ All diagrams are saved in `draw/img/`:
 
 ### For Papers
 
-1. **Main Architecture Figure** (overall_architecture.png)
+1. **Main Architecture Figure** (⭐ **comprehensive_architecture.png** - Recommended)
    - Use as Figure 1 or Figure 2 in your paper
-   - Caption: "Overall architecture of Enhanced ReferSAM"
+   - Caption: "Overall architecture of Enhanced ReferSAM with Enhanced Loss Functions"
+   - **Advantages**: 
+     - Shows complete model flow from input to output
+     - Includes detailed Enhanced Loss Functions module (highlighted as contribution)
+     - All enhanced modules clearly marked with red/orange borders
+     - Loss function shows: Base Losses, Enhanced Losses (Focal, IoU, Boundary), Adaptive Weighting, and Curriculum Learning
+     - Perfect for demonstrating the full contribution of the paper
+   
+   **Alternative**: overall_architecture.png (simplified version without detailed loss function)
 
 2. **Module Details** (multiscale_fusion.png, c1c2_fusion.png, etc.)
    - Use as subfigures in detailed method section
@@ -67,8 +76,12 @@ For LaTeX users, a TikZ version is available: `tikz_architecture.tex`
 
 ## Customization
 
-### Python Script
+### Python Scripts
 
+**For comprehensive architecture (recommended):**
+Edit `draw_comprehensive_architecture.py` to customize:
+
+**For original architecture:**
 Edit `draw_professional_architecture.py` to customize:
 
 ```python
@@ -87,6 +100,10 @@ fontsize=10, fontweight='bold'
 
 Then run:
 ```bash
+# For comprehensive architecture (recommended)
+python draw/draw_comprehensive_architecture.py
+
+# For original architecture
 python draw/draw_professional_architecture.py
 ```
 
@@ -131,10 +148,12 @@ pdflatex tikz_architecture.tex
 
 ```
 draw/
-├── README.md                          # This file
-├── draw_professional_architecture.py  # Python script for PNG generation
-├── tikz_architecture.tex               # TikZ/LaTeX code for vector graphics
+├── README.md                              # This file
+├── draw_professional_architecture.py      # Python script for PNG generation (original)
+├── draw_comprehensive_architecture.py     # Python script for comprehensive architecture (recommended)
+├── tikz_architecture.tex                  # TikZ/LaTeX code for vector graphics
 └── img/
+    ├── comprehensive_architecture.png     # ⭐ Recommended for paper main figure
     ├── overall_architecture.png
     ├── multiscale_fusion.png
     ├── c1c2_fusion.png
