@@ -40,8 +40,8 @@ dataset_weights:
   refcoco: 1.0           # RefCOCO数据集权重
   refcoco+: 1.0          # RefCOCO+数据集权重
   refcocog: 1.0          # RefCOCOg数据集权重
-  ref-zom: 1.2          # Ref-ZOM数据集权重（相对较难）
-  grefcoco: 0.9          # GRefCOCO数据集权重
+  ref-zom: 1.0          # Ref-ZOM数据集权重（相对较难）
+  grefcoco: 1.0          # GRefCOCO数据集权重
 
 # Point sampling parameters (inherited from original) - 点采样参数
 num_points: 12544        # 112*112
