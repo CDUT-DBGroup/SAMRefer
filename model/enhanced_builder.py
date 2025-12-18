@@ -329,72 +329,39 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
         else:
             print(f"Loading DeepSpeed checkpoint from {checkpoint_path}")
         
-        # 在加载检查点之前，先检查并注册 position_ids（如果需要）
         try:
-            # 先尝试提取 state_dict 检查是否有 position_ids
-            from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
-            state_dict = get_fp32_state_dict_from_zero_checkpoint(checkpoint_path)
-            
-            # 查找 position_ids 键
-            position_ids_key = None
-            position_ids_value = None
-            for key in list(state_dict.keys()):
-                if 'position_ids' in key and 'text_encoder' in key:
-                    position_ids_key = key
-                    position_ids_value = state_dict.pop(key)
-                    print(f"Found position_ids in checkpoint: {key}, shape: {position_ids_value.shape}")
-                    
-                    # 注册为 text_encoder.embeddings 的缓冲区
-                    if hasattr(model_engine.module.text_encoder, 'embeddings'):
-                        model_engine.module.text_encoder.embeddings.register_buffer(
-                            'position_ids',
-                            position_ids_value.clone()
-                        )
-                        print("Registered position_ids as buffer in text_encoder.embeddings")
-                    else:
-                        # 如果结构不同，尝试直接注册到 text_encoder
-                        buffer_name = key.replace('text_encoder.', '').replace('.', '_')
-                        model_engine.module.text_encoder.register_buffer(
-                            buffer_name,
-                            position_ids_value.clone()
-                        )
-                        print(f"Registered position_ids as buffer in text_encoder with name: {buffer_name}")
-                    break
-            
-            # 如果有 position_ids，先手动加载过滤后的 state_dict
-            if position_ids_key is not None:
-                print("Loading checkpoint with position_ids preserved as buffer...")
-                missing_keys, unexpected_keys = model_engine.module.load_state_dict(state_dict, strict=False)
-                if missing_keys:
-                    print(f"Missing keys (will use default values): {len(missing_keys)} keys")
-                if unexpected_keys:
-                    print(f"Unexpected keys (ignored): {len(unexpected_keys)} keys")
-                print("Successfully loaded checkpoint with position_ids preserved")
-                client_state = {}
-            else:
-                # 没有 position_ids，使用正常的加载方式
-                _, client_state = model_engine.load_checkpoint(checkpoint_path)
-                print(f"Successfully loaded DeepSpeed checkpoint")
-                if client_state:
-                    print(f"Client state: {client_state}")
+            _, client_state = model_engine.load_checkpoint(checkpoint_path)
+            print(f"Successfully loaded DeepSpeed checkpoint")
+            if client_state:
+                print(f"Client state: {client_state}")
         except RuntimeError as e:
             error_msg = str(e)
             if "position_ids" in error_msg:
-                print(f"Warning: Encountered position_ids error during normal load")
-                print("This should not happen if pre-registration worked. Re-raising error...")
-            raise
-        except Exception as e:
-            # 如果 get_fp32_state_dict_from_zero_checkpoint 失败，回退到正常加载
-            print(f"Warning: Could not pre-check checkpoint, using normal load: {e}")
-            try:
-                _, client_state = model_engine.load_checkpoint(checkpoint_path)
-                print(f"Successfully loaded DeepSpeed checkpoint")
-                if client_state:
-                    print(f"Client state: {client_state}")
-            except RuntimeError as e2:
-                error_msg = str(e2)
-                if "position_ids" in error_msg:
-                    print(f"Error: Failed to load checkpoint with position_ids. Please check transformers version compatibility.")
+                print(f"Warning: Encountered position_ids in checkpoint (likely due to transformers version mismatch)")
+                print("Attempting to load checkpoint with filtered state_dict...")
+                
+                # 使用 DeepSpeed 工具提取 state_dict 并过滤 position_ids
+                from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
+                try:
+                    state_dict = get_fp32_state_dict_from_zero_checkpoint(checkpoint_path)
+                    # 只过滤掉 position_ids 相关的键
+                    filtered_state_dict = {k: v for k, v in state_dict.items() if 'position_ids' not in k}
+                    filtered_count = len(state_dict) - len(filtered_state_dict)
+                    if filtered_count > 0:
+                        print(f"Filtered out {filtered_count} position_ids key(s)")
+                    
+                    # 直接加载到模型（使用 strict=False 允许部分键不匹配）
+                    missing_keys, unexpected_keys = model_engine.module.load_state_dict(filtered_state_dict, strict=False)
+                    if missing_keys:
+                        print(f"Missing keys (will use default values): {len(missing_keys)} keys")
+                    if unexpected_keys:
+                        print(f"Unexpected keys (ignored): {len(unexpected_keys)} keys")
+                    print("Successfully loaded DeepSpeed checkpoint with filtered state_dict")
+                    client_state = {}
+                except Exception as e2:
+                    raise RuntimeError(f"Failed to load checkpoint even with filtering: {e2}")
+            else:
+                # 其他类型的错误，直接抛出
                 raise
         
         model_engine.eval()
