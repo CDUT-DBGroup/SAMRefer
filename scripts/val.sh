@@ -13,4 +13,4 @@ conda activate SAM
 # 设置随机种子
 export PYTHONHASHSEED=123456
 NUM_GPUS=1
-deepspeed --num_gpus $NUM_GPUS validate_bert.py --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json --config configs/main_refersam_bert.yaml --use_enhanced_loss --loss_config_path configs/enhanced_loss_config.yaml > validate_test_1218_all.log 2>&1 &
+deepspeed --num_gpus $NUM_GPUS validate_bert.py --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json --config configs/main_refersam_bert.yaml --use_enhanced_loss --loss_config_path configs/enhanced_loss_config.yaml > 我的论文模型的验证集-1208.log 2>&1 &

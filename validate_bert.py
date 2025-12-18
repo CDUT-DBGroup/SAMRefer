@@ -260,7 +260,10 @@ def create_datasets(args):
     datasets = []
     for cfg in dataset_configs:
         dataset = cfg['class'](**cfg['kwargs'])
-        datasets.append((dataset, cfg['name']))
+        # 构建包含split信息的完整名称
+        split = cfg['kwargs'].get('split', 'unknown')
+        full_name = f"{cfg['name']}_{split}"
+        datasets.append((dataset, full_name))
     return datasets
 
 
