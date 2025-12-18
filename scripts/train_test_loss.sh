@@ -2,12 +2,24 @@
 # 优化后的训练脚本
 # 使用改进的模型架构、训练策略和数据增强
 
+#!/bin/bash
+# 优化后的训练脚本
+# 使用改进的模型架构、训练策略和数据增强
+
 echo "Starting optimized ReferSAM training..."
 
-# 设置环境变量
+# 首先检查 CUDA 是否可用
+if ! python -c "import torch; print(torch.cuda.is_available())" 2>/dev/null | grep -q True; then
+    echo "Warning: CUDA not detected by PyTorch"
+fi
+
+# 设置 CUDA 相关环境变量（必须在 conda activate 之前）
 export CUDA_VISIBLE_DEVICES=0,1
 export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+
+# 强制 DeepSpeed 使用 CUDA（如果支持）
+export DS_ACCELERATOR=cuda
 
 # 激活conda环境
 source ~/conda.env
