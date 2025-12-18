@@ -1,9 +1,9 @@
 #! /bin/bash
 
 #JSUB -q ai_share
+#JSUB -m gpu07
+#JSUB -n 8
 #JSUB -gpgpu 2
 #JSUB -J refersam_train
-#JSUB -o output.%J
-#JSUB -e error.%J
 # bash scripts/train_test_loss.sh
 bash scripts/val.sh

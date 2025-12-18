@@ -6,11 +6,34 @@ import yaml
 import os
 import glob
 import json
+import socket
 
 from .models import *
 from .segment_anything import sam_model_registry
 from .criterion import SegMaskLoss, criterion_dict
 from .enhanced_criterion import EnhancedSegMaskLoss, enhanced_criterion_dict
+
+
+def _find_available_port(start_port=29500, max_attempts=100):
+    """
+    查找一个可用的端口
+    
+    Args:
+        start_port: 起始端口号
+        max_attempts: 最大尝试次数
+    
+    Returns:
+        可用的端口号，如果找不到则返回 None
+    """
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('', port))
+                return port
+        except OSError:
+            continue
+    return None
 
 
 def _is_deepspeed_checkpoint(checkpoint_path):
@@ -286,8 +309,44 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
             os.environ['WORLD_SIZE'] = '1'
         if 'MASTER_ADDR' not in os.environ:
             os.environ['MASTER_ADDR'] = 'localhost'
+        
+        # 设置 MASTER_PORT：如果环境变量已设置则使用，否则自动查找可用端口
         if 'MASTER_PORT' not in os.environ:
-            os.environ['MASTER_PORT'] = '29500'
+            # 首先尝试默认端口 29500
+            default_port = 29500
+            available_port = _find_available_port(start_port=default_port, max_attempts=100)
+            if available_port is None:
+                # 如果默认端口范围都不可用，尝试从 20000 开始
+                available_port = _find_available_port(start_port=20000, max_attempts=100)
+            
+            if available_port is not None:
+                os.environ['MASTER_PORT'] = str(available_port)
+                print(f"Using available port: {available_port}")
+            else:
+                # 如果仍然找不到可用端口，使用默认值（可能会失败，但至少尝试）
+                os.environ['MASTER_PORT'] = str(default_port)
+                print(f"Warning: Could not find available port, using default: {default_port}")
+        else:
+            # 如果用户已经设置了端口，验证它是否可用
+            try:
+                user_port = int(os.environ['MASTER_PORT'])
+                test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    test_socket.bind(('', user_port))
+                    test_socket.close()
+                    print(f"Using user-specified port: {user_port}")
+                except OSError:
+                    # 用户指定的端口不可用，尝试查找替代端口
+                    print(f"Warning: User-specified port {user_port} is not available, finding alternative...")
+                    available_port = _find_available_port(start_port=20000, max_attempts=100)
+                    if available_port is not None:
+                        os.environ['MASTER_PORT'] = str(available_port)
+                        print(f"Using alternative port: {available_port}")
+                    else:
+                        print(f"Warning: Could not find alternative port, keeping user-specified: {user_port}")
+            except (ValueError, OSError) as e:
+                print(f"Warning: Invalid or unavailable port {os.environ['MASTER_PORT']}: {e}")
         
         # 禁用 MPI 检测，避免 MPI 初始化错误
         os.environ['PMI_RANK'] = '0'
@@ -329,10 +388,34 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
         else:
             print(f"Loading DeepSpeed checkpoint from {checkpoint_path}")
         
-        _, client_state = model_engine.load_checkpoint(checkpoint_path)
-        print(f"Successfully loaded DeepSpeed checkpoint")
-        if client_state:
-            print(f"Client state: {client_state}")
+        # 尝试加载 checkpoint，如果遇到 world size 不匹配，只加载模型权重
+        try:
+            _, client_state = model_engine.load_checkpoint(checkpoint_path)
+            print(f"Successfully loaded DeepSpeed checkpoint (with optimizer states)")
+            if client_state:
+                print(f"Client state: {client_state}")
+        except Exception as e:
+            error_msg = str(e)
+            # 检查是否是 world size 不匹配的错误
+            if "world size" in error_msg.lower() or "ZeRO" in error_msg or "ZeRORuntimeException" in error_msg:
+                print(f"Warning: Checkpoint was saved with different world_size. Loading model weights only (skipping optimizer states)...")
+                print(f"Original error: {error_msg}")
+                try:
+                    # 只加载模型权重，不加载优化器状态和调度器状态
+                    _, client_state = model_engine.load_checkpoint(
+                        checkpoint_path,
+                        load_optimizer_states=False,
+                        load_lr_scheduler_states=False
+                    )
+                    print(f"Successfully loaded DeepSpeed checkpoint (model weights only)")
+                    if client_state:
+                        print(f"Client state: {client_state}")
+                    print("Note: Optimizer states were not loaded due to world_size mismatch. This is fine for evaluation/inference.")
+                except Exception as e2:
+                    raise RuntimeError(f"Failed to load checkpoint even without optimizer states: {e2}")
+            else:
+                # 其他类型的错误，直接抛出
+                raise
         
         model_engine.eval()
         return model_engine.module, checkpoint_info['use_fp16'], checkpoint_info['use_bf16'], model_engine
