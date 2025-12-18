@@ -1,1 +1,1 @@
-python test_negative_masks.py --compare --num_samples 0 --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json --config configs/main_refersam_bert.yaml --use_enhanced_loss --loss_config_path configs/enhanced_loss_config.yaml > validate_test.log 2>&1 &
+python validate_bert.py --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json --config configs/main_refersam_bert.yaml --use_enhanced_loss --loss_config_path configs/enhanced_loss_config.yaml > validate_test_1218_all.log 2>&1 &
