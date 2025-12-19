@@ -6,11 +6,34 @@ import yaml
 import os
 import glob
 import json
+import socket
 
 from .models import *
 from .segment_anything import sam_model_registry
 from .criterion import SegMaskLoss, criterion_dict
 from .enhanced_criterion import EnhancedSegMaskLoss, enhanced_criterion_dict
+
+
+def _find_available_port(start_port=29500, max_attempts=100):
+    """
+    查找一个可用的端口
+    
+    Args:
+        start_port: 起始端口号
+        max_attempts: 最大尝试次数
+    
+    Returns:
+        可用的端口号，如果找不到则返回 None
+    """
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('', port))
+                return port
+        except OSError:
+            continue
+    return None
 
 
 def _is_deepspeed_checkpoint(checkpoint_path):
@@ -286,8 +309,44 @@ def load_model_with_checkpoint(model_func, pretrained, args, loss_config_path=No
             os.environ['WORLD_SIZE'] = '1'
         if 'MASTER_ADDR' not in os.environ:
             os.environ['MASTER_ADDR'] = 'localhost'
+        
+        # 设置 MASTER_PORT：如果环境变量已设置则使用，否则自动查找可用端口
         if 'MASTER_PORT' not in os.environ:
-            os.environ['MASTER_PORT'] = '29500'
+            # 首先尝试默认端口 29500
+            default_port = 29500
+            available_port = _find_available_port(start_port=default_port, max_attempts=100)
+            if available_port is None:
+                # 如果默认端口范围都不可用，尝试从 20000 开始
+                available_port = _find_available_port(start_port=20000, max_attempts=100)
+            
+            if available_port is not None:
+                os.environ['MASTER_PORT'] = str(available_port)
+                print(f"Using available port: {available_port}")
+            else:
+                # 如果仍然找不到可用端口，使用默认值（可能会失败，但至少尝试）
+                os.environ['MASTER_PORT'] = str(default_port)
+                print(f"Warning: Could not find available port, using default: {default_port}")
+        else:
+            # 如果用户已经设置了端口，验证它是否可用
+            try:
+                user_port = int(os.environ['MASTER_PORT'])
+                test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                try:
+                    test_socket.bind(('', user_port))
+                    test_socket.close()
+                    print(f"Using user-specified port: {user_port}")
+                except OSError:
+                    # 用户指定的端口不可用，尝试查找替代端口
+                    print(f"Warning: User-specified port {user_port} is not available, finding alternative...")
+                    available_port = _find_available_port(start_port=20000, max_attempts=100)
+                    if available_port is not None:
+                        os.environ['MASTER_PORT'] = str(available_port)
+                        print(f"Using alternative port: {available_port}")
+                    else:
+                        print(f"Warning: Could not find alternative port, keeping user-specified: {user_port}")
+            except (ValueError, OSError) as e:
+                print(f"Warning: Invalid or unavailable port {os.environ['MASTER_PORT']}: {e}")
         
         # 禁用 MPI 检测，避免 MPI 初始化错误
         os.environ['PMI_RANK'] = '0'
