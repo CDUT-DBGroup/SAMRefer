@@ -263,11 +263,13 @@ class ReferzomDataset(data.Dataset):
                  split='train',
                  eval_mode=False,
                  size=480,
-                 precision='fp32'):
+                 precision='fp32',
+                 return_all_sentences=False):
         self.clip = 'clip' in bert_tokenizer
         self.split = split
         self.dataset_type = dataset
         self.eval_mode = eval_mode
+        self.return_all_sentences = return_all_sentences  # 是否返回所有描述用于选择最优
         self.max_tokens = max_tokens
         self.size = size
 
@@ -361,14 +363,33 @@ class ReferzomDataset(data.Dataset):
         annot = self.mask_transform(annot).float()
 
         # Choose a sentence
-        if self.eval_mode:
+        if self.return_all_sentences and self.eval_mode:
+            # 返回所有描述，用于在验证时选择最优描述
+            num_sentences = len(self.input_ids[index])
+            all_word_ids = [self.input_ids[index][i].clone().to(dtype=torch.long) for i in range(num_sentences)]
+            all_word_masks = [self.word_masks[index][i].clone().to(dtype=torch.long) for i in range(num_sentences)]
+            all_sentences = self.all_sentences[index]
+            
+            # 使用第一个描述作为默认（用于兼容性）
+            word_ids = all_word_ids[0]
+            word_masks = all_word_masks[0]
+            sentence = all_sentences[0]
+        elif self.eval_mode:
             sent_idx = 0
+            word_ids = self.input_ids[index][sent_idx].to(dtype=torch.long)
+            word_masks = self.word_masks[index][sent_idx].to(dtype=torch.long)
+            sentence = self.all_sentences[index][sent_idx]
+            all_word_ids = []
+            all_word_masks = []
+            all_sentences = []
         else:
             sent_idx = random.randint(0, len(self.input_ids[index]) - 1)
-
-        word_ids = self.input_ids[index][sent_idx].to(dtype=torch.long)
-        word_masks = self.word_masks[index][sent_idx].to(dtype=torch.long)
-        sentence = self.all_sentences[index][sent_idx]
+            word_ids = self.input_ids[index][sent_idx].to(dtype=torch.long)
+            word_masks = self.word_masks[index][sent_idx].to(dtype=torch.long)
+            sentence = self.all_sentences[index][sent_idx]
+            all_word_ids = []
+            all_word_masks = []
+            all_sentences = []
 
         samples = {
             "img": image,
@@ -377,6 +398,12 @@ class ReferzomDataset(data.Dataset):
             "word_ids": word_ids,
             "word_masks": word_masks,
         }
+        
+        # 如果返回所有描述，添加到samples中
+        if self.return_all_sentences and self.eval_mode and len(all_word_ids) > 0:
+            samples["all_word_ids"] = all_word_ids
+            samples["all_word_masks"] = all_word_masks
+            samples["all_sentences"] = all_sentences
 
         targets = {
             "mask": annot,

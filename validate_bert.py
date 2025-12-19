@@ -73,6 +73,75 @@ def count_parameters(model):
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total_params, trainable_params
 
+
+def custom_collate_fn(batch):
+    """
+    自定义collate函数，用于处理包含列表的样本（如all_word_ids, all_word_masks）
+    """
+    samples_list = [item[0] for item in batch]
+    targets_list = [item[1] for item in batch]
+    
+    # 检查是否有all_word_ids（表示需要特殊处理）
+    has_all_sentences = 'all_word_ids' in samples_list[0]
+    
+    if has_all_sentences:
+        # 对于包含所有描述的情况，我们需要特殊处理
+        # 将列表字段单独处理，其他字段正常collate
+        collated_samples = {}
+        collated_targets = {}
+        
+        # 正常collate的字段
+        # 处理img
+        if 'img' in samples_list[0]:
+            collated_samples['img'] = torch.stack([s['img'] for s in samples_list])
+        
+        # 处理orig_size（可能是numpy数组）
+        if 'orig_size' in samples_list[0]:
+            orig_sizes = [s['orig_size'] for s in samples_list]
+            if isinstance(orig_sizes[0], np.ndarray):
+                collated_samples['orig_size'] = torch.stack([torch.from_numpy(os) for os in orig_sizes])
+            elif isinstance(orig_sizes[0], torch.Tensor):
+                collated_samples['orig_size'] = torch.stack(orig_sizes)
+            else:
+                collated_samples['orig_size'] = torch.stack([torch.tensor(os) for os in orig_sizes])
+        
+        # 处理word_ids和word_masks
+        if 'word_ids' in samples_list[0]:
+            collated_samples['word_ids'] = torch.stack([s['word_ids'] for s in samples_list])
+        if 'word_masks' in samples_list[0]:
+            collated_samples['word_masks'] = torch.stack([s['word_masks'] for s in samples_list])
+        
+        # 处理text（保持为列表）
+        if 'text' in samples_list[0]:
+            collated_samples['text'] = [s['text'] for s in samples_list]
+        
+        # 列表字段保持为列表（不collate）
+        list_keys = ['all_word_ids', 'all_word_masks', 'all_sentences']
+        for key in list_keys:
+            if key in samples_list[0]:
+                collated_samples[key] = [s[key] for s in samples_list]
+        
+        # targets正常collate
+        for key in targets_list[0].keys():
+            if key == 'mask':
+                collated_targets[key] = torch.stack([t[key] for t in targets_list])
+            elif key == 'orig_size':
+                orig_sizes = [t[key] for t in targets_list]
+                if isinstance(orig_sizes[0], np.ndarray):
+                    collated_targets[key] = torch.stack([torch.from_numpy(os) for os in orig_sizes])
+                elif isinstance(orig_sizes[0], torch.Tensor):
+                    collated_targets[key] = torch.stack(orig_sizes)
+                else:
+                    collated_targets[key] = torch.stack([torch.tensor(os) for os in orig_sizes])
+            else:
+                collated_targets[key] = [t[key] for t in targets_list]
+        
+        return collated_samples, collated_targets
+    else:
+        # 使用默认的collate方式
+        from torch.utils.data._utils.collate import default_collate
+        return default_collate(batch)
+
 def log_sample_info(dataset, name, num_samples=2):
     logger.info(f"===== Inspecting {name} dataset, total {len(dataset)} samples =====")
     for i in range(min(num_samples, len(dataset))):
@@ -258,10 +327,18 @@ def create_datasets(args):
     ]
 
     datasets = []
+    use_best_sentence = getattr(args, 'use_best_sentence', False)
     for cfg in dataset_configs:
-        dataset = cfg['class'](**cfg['kwargs'])
+        kwargs = cfg['kwargs'].copy()
+        # 如果使用最优描述，为支持的数据集添加return_all_sentences参数
+        if use_best_sentence:
+            # ReferDataset, GRefDataset, ReferzomDataset都支持
+            if cfg['class'] in [ReferDataset, GRefDataset, ReferzomDataset]:
+                kwargs['return_all_sentences'] = True
+                kwargs['eval_mode'] = True  # 使用最优描述时，必须启用eval_mode
+        dataset = cfg['class'](**kwargs)
         # 构建包含split信息的完整名称
-        split = cfg['kwargs'].get('split', 'unknown')
+        split = kwargs.get('split', 'unknown')
         full_name = f"{cfg['name']}_{split}"
         datasets.append((dataset, full_name))
     return datasets
@@ -316,19 +393,24 @@ def evaluate_four_datasets():
         log_sample_info(dataset, name)
 
     # 验证每个数据集
+    use_best_sentence = getattr(args, 'use_best_sentence', False)
     for dataset, name in datasets:
         logger.info(f"\nStarting validation for {name}...")
+        # 如果使用最优描述，需要使用自定义collate函数
+        collate_fn = custom_collate_fn if use_best_sentence else None
         val_loader = DataLoader(
             dataset,
             batch_size=args.batch_size,
             shuffle=False,
-            num_workers=8,
-            pin_memory=True
+            num_workers=0,
+            pin_memory=True,
+            collate_fn=collate_fn
         )
-        # 支持通过args传递use_negative_masks参数
+        # 支持通过args传递use_negative_masks和use_best_sentence参数
         use_negative_masks = getattr(args, 'use_negative_masks', False)
-        metrics = validate(eval_model, val_loader, device, use_fp16=use_fp16, use_bf16=use_bf16, use_negative_masks=use_negative_masks)
-        logger.info(f"\nValidation Results for {name} (use_negative_masks={use_negative_masks}):")
+        metrics = validate(eval_model, val_loader, device, use_fp16=use_fp16, use_bf16=use_bf16, 
+                          use_negative_masks=use_negative_masks, use_best_sentence=use_best_sentence)
+        logger.info(f"\nValidation Results for {name} (use_negative_masks={use_negative_masks}, use_best_sentence={use_best_sentence}):")
         logger.info(f"mIoU: {metrics['mIoU']:.4f}")
         logger.info(f"oIoU: {metrics['oIoU']:.4f}")
         logger.info(f"gIoU: {metrics['gIoU']:.4f}")

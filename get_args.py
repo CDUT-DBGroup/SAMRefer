@@ -31,6 +31,8 @@ def get_args():
                        default='all', help='Loss ablation study mode')
     parser.add_argument('--use_negative_masks', action='store_true',
                        help='Use negative mask selection and adaptive fusion (BMS method)')
+    parser.add_argument('--use_best_sentence', action='store_true',
+                       help='Use best sentence for validation')
     # Step 4: 解析所有参数（命令行优先）
     args = parser.parse_args()
     return args

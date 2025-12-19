@@ -38,7 +38,8 @@ class ReferDataset(data.Dataset):
                  negative_samples=0,
                  positive_samples=1,
                  pseudo_path=None,
-                 precision='fp32') -> None:
+                 precision='fp32',
+                 return_all_sentences=False) -> None:
         """
         parameters:
             refer_data_root: root directory of the dataset
@@ -91,6 +92,7 @@ class ReferDataset(data.Dataset):
 
         self.ref_ids = ref_ids
         self.eval_mode = eval_mode
+        self.return_all_sentences = return_all_sentences  # 是否返回所有描述用于选择最优
 
         self.input_ids = []
         self.word_masks = []
@@ -176,7 +178,18 @@ class ReferDataset(data.Dataset):
         img = self.image_transform(img)
         annot = self.mask_transform(annot)
 
-        if self.eval_mode:
+        if self.return_all_sentences and self.eval_mode:
+            # 返回所有描述，用于在验证时选择最优描述
+            num_sentences = len(self.input_ids[index])
+            all_word_ids = [self.input_ids[index][i].clone().to(dtype=torch.long) for i in range(num_sentences)]
+            all_word_masks = [self.word_masks[index][i].clone().to(dtype=torch.long) for i in range(num_sentences)]
+            all_sentences = self.all_sentences[index]
+            
+            # 使用第一个描述作为默认（用于兼容性）
+            word_ids = all_word_ids[0]
+            word_masks = all_word_masks[0]
+            sentences = all_sentences[0]
+        elif self.eval_mode:
             choice_sent = 0  # Use the first sentence for evaluation
             word_ids = self.input_ids[index][choice_sent]
             word_masks = self.word_masks[index][choice_sent]
@@ -201,6 +214,12 @@ class ReferDataset(data.Dataset):
             "word_ids": word_ids,
             "word_masks": word_masks,
         }
+        
+        # 如果返回所有描述，添加到samples中
+        if self.return_all_sentences and self.eval_mode:
+            samples["all_word_ids"] = all_word_ids
+            samples["all_word_masks"] = all_word_masks
+            samples["all_sentences"] = all_sentences
 
         targets = {
             "mask": annot,  # tensor

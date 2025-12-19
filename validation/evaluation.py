@@ -95,7 +95,11 @@ def calculate_point_metric(pred_mask, target_mask, num_points=100):
 #     return correct.item()
 
 # 这个是我新加的，不一定稳定可用，需要测试
-def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_negative_masks=False):
+def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_negative_masks=False, use_best_sentence=False):
+    """
+    Args:
+        use_best_sentence: 如果为True，对每个样本的所有描述进行推理，选择IoU最高的结果
+    """
     model.eval()
 
     total_intersection = 0.0
@@ -109,6 +113,14 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
     all_pointms = []
     best_iou = 0.0
 
+    # 获取数据集对象以访问所有描述
+    dataset = val_loader.dataset
+    if hasattr(dataset, 'dataset'):  # 如果是ConcatDataset，需要特殊处理
+        # 对于ConcatDataset，我们无法直接访问所有描述，回退到普通模式
+        if use_best_sentence:
+            print("Warning: use_best_sentence is not supported for ConcatDataset, using first sentence instead")
+            use_best_sentence = False
+
     with torch.no_grad():
         for batch_idx, (samples, targets) in enumerate(tqdm(val_loader, desc='Validating')):
             # 保持与训练阶段一致的精度设置，避免 dtype 不匹配
@@ -118,13 +130,67 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                 img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
             else:
                 img = samples['img'].to(device, non_blocking=True)
-            word_ids = samples['word_ids'].to(device, non_blocking=True)
-            word_masks = samples['word_masks'].to(device, non_blocking=True)
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)  # [B,H,W]
 
-            pred_masks = model(img, word_ids, word_masks, use_negative_masks=use_negative_masks)
-            if pred_masks.ndim == 4:
-                pred_masks = pred_masks.squeeze(1)
+            if use_best_sentence and 'all_word_ids' in samples:
+                # 对每个样本的所有描述进行推理，选择IoU最高的
+                batch_size = img.shape[0]
+                best_pred_masks = []
+                
+                for i in range(batch_size):
+                    img_i = img[i:i+1]
+                    target_i = target[i:i+1]
+                    all_word_ids_i = samples['all_word_ids'][i]
+                    all_word_masks_i = samples['all_word_masks'][i]
+                    
+                    best_pred = None
+                    best_iou_score = -1.0
+                    
+                    # 对每个描述进行推理
+                    for word_ids_i, word_masks_i in zip(all_word_ids_i, all_word_masks_i):
+                        word_ids_i = word_ids_i.unsqueeze(0).to(device, non_blocking=True)
+                        word_masks_i = word_masks_i.unsqueeze(0).to(device, non_blocking=True)
+                        
+                        pred_mask_i = model(img_i, word_ids_i, word_masks_i, use_negative_masks=use_negative_masks)
+                        if pred_mask_i.ndim == 4:
+                            pred_mask_i = pred_mask_i.squeeze(1)
+                        
+                        # 计算IoU
+                        pred_bool = (pred_mask_i[0] > 0.5).bool()
+                        tgt_bool = target_i[0].bool()
+                        intersection = (pred_bool & tgt_bool).float().sum().item()
+                        union = (pred_bool | tgt_bool).float().sum().item()
+                        
+                        if union > 0:
+                            iou_score = intersection / union
+                        else:
+                            iou_score = 1.0 if intersection == 0 else 0.0
+                        
+                        # 选择IoU最高的预测
+                        if iou_score > best_iou_score:
+                            best_iou_score = iou_score
+                            best_pred = pred_mask_i[0]
+                    
+                    if best_pred is None:
+                        # 如果没有找到，使用第一个描述的结果
+                        word_ids_i = all_word_ids_i[0].unsqueeze(0).to(device, non_blocking=True)
+                        word_masks_i = all_word_masks_i[0].unsqueeze(0).to(device, non_blocking=True)
+                        pred_mask_i = model(img_i, word_ids_i, word_masks_i, use_negative_masks=use_negative_masks)
+                        if pred_mask_i.ndim == 4:
+                            pred_mask_i = pred_mask_i.squeeze(1)
+                        best_pred = pred_mask_i[0]
+                    
+                    best_pred_masks.append(best_pred)
+                
+                pred_masks = torch.stack(best_pred_masks, dim=0)
+            else:
+                # 使用提供的描述进行推理
+                word_ids = samples['word_ids'].to(device, non_blocking=True)
+                word_masks = samples['word_masks'].to(device, non_blocking=True)
+                
+                pred_masks = model(img, word_ids, word_masks, use_negative_masks=use_negative_masks)
+                if pred_masks.ndim == 4:
+                    pred_masks = pred_masks.squeeze(1)
 
             # 显式二值化处理（避免预测值不在0/1）
             pred_masks = (pred_masks > 0.5).float()
