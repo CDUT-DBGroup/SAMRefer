@@ -17,6 +17,12 @@ from get_args import get_args
 sentence = 'sentences'
 
 
+def squeeze_and_long(x):
+    """辅助函数：将tensor压缩并转换为long类型，用于mask transform
+    这个函数必须在模块级别定义，以便在多进程DataLoader中可以被pickle序列化
+    """
+    return x.squeeze().long()
+
 
 class ReferDataset(data.Dataset):
     def __init__(self,
@@ -141,7 +147,7 @@ class ReferDataset(data.Dataset):
         self.mask_transform = transforms.Compose([
             transforms.Resize((size, size), interpolation=transforms.InterpolationMode.NEAREST),  # 避免插值产生非整数标签
             transforms.PILToTensor(),       # 保持 int 类型，不归一化
-            transforms.Lambda(lambda x: x.squeeze().long())  # 若是单通道，去掉通道维度并转为 LongTensor
+            transforms.Lambda(squeeze_and_long)  # 若是单通道，去掉通道维度并转为 LongTensor
         ])
 
     def __len__(self):

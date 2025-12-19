@@ -21,13 +21,13 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
 
-def set_seed(seed=42):
+def set_seed(seed=123456):
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = False
+    torch.backends.cudnn.benchmark = True
 
 set_seed()
 
@@ -105,7 +105,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'val',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -120,7 +120,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'testA',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -135,7 +135,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'testB',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -150,7 +150,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'val',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -165,7 +165,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'testA',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -180,7 +180,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'testB',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -195,7 +195,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'val',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -210,21 +210,21 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'test',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
         },
-        {
-            'name': 'referit',
-            'class': ReferitDataset,
-            'kwargs': {
-                'root': args.data_referit_root,
-                'split': 'val',
-                'max_tokens': getattr(args, 'max_tokens', 30),
-                'size': getattr(args, 'img_size', 320)
-            }
-        },
+        # {
+        #     'name': 'referit',
+        #     'class': ReferitDataset,
+        #     'kwargs': {
+        #         'root': args.data_referit_root,
+        #         'split': 'val',
+        #         'max_tokens': getattr(args, 'max_tokens', 30),
+        #         'size': getattr(args, 'img_size', 320)
+        #     }
+        # },
         {
             'name': 'grefcoco',
             'class': GRefDataset,
@@ -235,7 +235,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'val',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -250,7 +250,7 @@ def create_datasets(args):
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
                 'split': 'test',
-                'eval_mode': True,
+                'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
@@ -322,7 +322,7 @@ def evaluate_four_datasets():
             dataset,
             batch_size=args.batch_size,
             shuffle=False,
-            num_workers=0,
+            num_workers=8,
             pin_memory=True
         )
         # 支持通过args传递use_negative_masks参数

@@ -18,6 +18,13 @@ from collections import defaultdict
 
 import torch
 import torch.distributed as dist
+
+
+def squeeze_and_long(x):
+    """辅助函数：将tensor压缩并转换为long类型，用于mask transform
+    这个函数必须在模块级别定义，以便在多进程DataLoader中可以被pickle序列化
+    """
+    return x.squeeze().long()
 from torch.utils.data.distributed import DistributedSampler
 
 # from args import get_parser
@@ -325,7 +332,7 @@ class ReferzomDataset(data.Dataset):
         self.mask_transform = transforms.Compose([
             transforms.Resize((self.size, self.size), interpolation=transforms.InterpolationMode.NEAREST),
             transforms.PILToTensor(),
-            transforms.Lambda(lambda x: x.squeeze().long())
+            transforms.Lambda(squeeze_and_long)
         ])
 
     def __len__(self):
