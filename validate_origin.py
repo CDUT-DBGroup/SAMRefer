@@ -17,7 +17,6 @@ from get_args import get_args
 # os.environ["CUDA_VISIBLE_DEVICES"]="1"
 import random
 import logging
-import glob
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 logger = logging.getLogger(__name__)
@@ -73,42 +72,6 @@ def count_parameters(model):
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     return total_params, trainable_params
-
-
-def _load_pytorch_checkpoint(model, checkpoint_path, device):
-    """
-    加载 PyTorch 格式的 checkpoint
-    """
-    if os.path.isdir(checkpoint_path):
-        # 查找所有 global_step 子目录
-        subdirs = glob.glob(os.path.join(checkpoint_path, "global_step*"))
-        if subdirs:
-            # 取最新的 global_step 子目录
-            latest_subdir = max(subdirs, key=os.path.getmtime)
-            logger.info(f"Loading model weights from {latest_subdir}")
-            checkpoint = torch.load(latest_subdir, map_location=device)
-        else:
-            logger.info(f"Loading model weights from {checkpoint_path}")
-            checkpoint = torch.load(checkpoint_path, map_location=device)
-    else:
-        logger.info(f"Loading model weights from {checkpoint_path}")
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-    
-    # 处理不同的 checkpoint 格式
-    if isinstance(checkpoint, dict):
-        if 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'])
-        elif 'state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['state_dict'])
-        else:
-            # 可能是直接的 state_dict
-            model.load_state_dict(checkpoint)
-    else:
-        model.load_state_dict(checkpoint)
-    
-    model = model.to(device)
-    model.eval()
-    return model
 
 
 def custom_collate_fn(batch):
@@ -394,21 +357,21 @@ def evaluate_four_datasets():
     # Initialize models and criterion
     logger.info("Initializing models...")
     
-    # 使用 model_origin 的 refersam 函数创建模型
+    # 使用 model_origin 的 refersam 函数创建模型，支持自动加载 checkpoint
     pretrained = hasattr(args, 'pre_train_path') and args.pre_train_path is not None
     
-    # 创建模型（pretrained 参数对于 model_origin 是字符串，这里我们传空字符串，稍后手动加载）
-    eval_model = refersam(pretrained='', args=args)
+    # 创建模型，refersam 会自动加载 checkpoint（如果 pretrained 不为 None）
+    eval_model = refersam(pretrained=pretrained, args=args)
     
-    # 如果指定了 checkpoint 路径，手动加载
-    if pretrained:
-        checkpoint_path = args.pre_train_path
-        logger.info(f"Loading checkpoint from {checkpoint_path}")
-        eval_model = _load_pytorch_checkpoint(eval_model, checkpoint_path, device)
-        logger.info("Successfully loaded PyTorch checkpoint")
-    else:
+    # 确保模型在正确的设备上并设置为评估模式
+    # 即使加载了 checkpoint，也确保设备正确（因为 builder 中可能使用默认设备）
+    if next(eval_model.parameters()).device != device:
         eval_model = eval_model.to(device)
-        eval_model.eval()
+    eval_model.eval()
+    
+    if pretrained:
+        logger.info("Successfully loaded checkpoint")
+    else:
         logger.warning("No checkpoint path specified, using initialized model")
     
     # Print model parameters

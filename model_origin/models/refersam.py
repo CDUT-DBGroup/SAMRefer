@@ -95,7 +95,7 @@ class ReferSAM(nn.Module):
         dense_pe = self.sam_prompt_encoder.pe_layer(spatial_shape).unsqueeze(0)
         return sparse_embeddings, dense_embeddings, dense_pe
 
-    def forward(self, img, text, l_mask, targets=None, return_probs=False):
+    def forward(self, img, text, l_mask, targets=None, return_probs=False, use_negative_masks=False):
         '''
             Input:
                 img       [BxCxHxW]
