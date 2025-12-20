@@ -309,6 +309,36 @@ def create_datasets(args):
                 'precision': args.precision
             }
         },
+         {
+            'name': 'grefcoco',
+            'class': GRefDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'grefcoco',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testA',
+                'eval_mode': False,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'grefcoco',
+            'class': GRefDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'grefcoco',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testB',
+                'eval_mode': False,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
         {
             'name': 'ref-zom',
             'class': ReferzomDataset,
