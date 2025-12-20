@@ -33,6 +33,8 @@ def get_args():
                        help='Use negative mask selection and adaptive fusion (BMS method)')
     parser.add_argument('--use_best_sentence', action='store_true',
                        help='Use best sentence for validation')
+    parser.add_argument('--sentence_aggregation', type=str, choices=['best', 'mean', 'mean_iou', 'median'],
+                       default='mean', help='Sentence aggregation method for validation')
     # Step 4: 解析所有参数（命令行优先）
     args = parser.parse_args()
     return args
