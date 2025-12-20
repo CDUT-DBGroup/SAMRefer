@@ -95,10 +95,17 @@ def calculate_point_metric(pred_mask, target_mask, num_points=100):
 #     return correct.item()
 
 # 这个是我新加的，不一定稳定可用，需要测试
-def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_negative_masks=False, use_best_sentence=False):
+def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_negative_masks=False, 
+             use_best_sentence=False, sentence_aggregation='mean'):
     """
     Args:
-        use_best_sentence: 如果为True，对每个样本的所有描述进行推理，选择IoU最高的结果
+        use_best_sentence: 如果为True，对每个样本的所有描述进行推理
+        sentence_aggregation: 多描述聚合方式
+            - 'best': 选择IoU最高的预测（可能不公平）
+            - 'mean': 对所有描述的预测mask取平均后二值化（推荐，公平）
+            - 'mean_iou': 对所有描述的IoU取平均（最公平，但需要多次推理）
+            - 'median': 选择IoU中位数的预测
+            - 'first': 使用第一个描述（默认行为）
     """
     model.eval()
 
@@ -133,9 +140,9 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
             target = targets['mask'].to(device, non_blocking=True).squeeze(1)  # [B,H,W]
 
             if use_best_sentence and 'all_word_ids' in samples:
-                # 对每个样本的所有描述进行推理，选择IoU最高的
+                # 对每个样本的所有描述进行推理，根据聚合方式选择结果
                 batch_size = img.shape[0]
-                best_pred_masks = []
+                final_pred_masks = []
                 
                 for i in range(batch_size):
                     img_i = img[i:i+1]
@@ -143,10 +150,20 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                     all_word_ids_i = samples['all_word_ids'][i]
                     all_word_masks_i = samples['all_word_masks'][i]
                     
-                    best_pred = None
-                    best_iou_score = -1.0
+                    if len(all_word_ids_i) == 0:
+                        # 如果没有描述，使用默认方式
+                        word_ids_i = samples['word_ids'][i:i+1].to(device, non_blocking=True)
+                        word_masks_i = samples['word_masks'][i:i+1].to(device, non_blocking=True)
+                        pred_mask_i = model(img_i, word_ids_i, word_masks_i, use_negative_masks=use_negative_masks)
+                        if pred_mask_i.ndim == 4:
+                            pred_mask_i = pred_mask_i.squeeze(1)
+                        final_pred_masks.append(pred_mask_i[0])
+                        continue
                     
                     # 对每个描述进行推理
+                    all_pred_masks = []
+                    sentence_ious = []  # 重命名局部变量，避免覆盖全局all_ious
+                    
                     for word_ids_i, word_masks_i in zip(all_word_ids_i, all_word_masks_i):
                         word_ids_i = word_ids_i.unsqueeze(0).to(device, non_blocking=True)
                         word_masks_i = word_masks_i.unsqueeze(0).to(device, non_blocking=True)
@@ -155,8 +172,14 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                         if pred_mask_i.ndim == 4:
                             pred_mask_i = pred_mask_i.squeeze(1)
                         
-                        # 计算IoU
-                        pred_bool = (pred_mask_i[0] > 0.5).bool()
+                        pred_mask_i = pred_mask_i[0]  # [H, W]
+                        # 确保是浮点数类型，以便后续计算平均值
+                        if pred_mask_i.dtype != torch.float32 and pred_mask_i.dtype != torch.float16 and pred_mask_i.dtype != torch.bfloat16:
+                            pred_mask_i = pred_mask_i.float()
+                        all_pred_masks.append(pred_mask_i)
+                        
+                        # 计算IoU（用于best/median/mean_iou模式）
+                        pred_bool = (pred_mask_i > 0.5).bool()
                         tgt_bool = target_i[0].bool()
                         intersection = (pred_bool & tgt_bool).float().sum().item()
                         union = (pred_bool | tgt_bool).float().sum().item()
@@ -165,24 +188,38 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                             iou_score = intersection / union
                         else:
                             iou_score = 1.0 if intersection == 0 else 0.0
-                        
+                        sentence_ious.append(iou_score)
+                    
+                    # 根据聚合方式选择最终预测
+                    if sentence_aggregation == 'best':
                         # 选择IoU最高的预测
-                        if iou_score > best_iou_score:
-                            best_iou_score = iou_score
-                            best_pred = pred_mask_i[0]
+                        best_idx = np.argmax(sentence_ious)
+                        final_pred = all_pred_masks[best_idx]
+                    elif sentence_aggregation == 'mean':
+                        # 对所有预测取平均，然后二值化（推荐，公平）
+                        stacked_preds = torch.stack(all_pred_masks, dim=0)  # [N, H, W]
+                        mean_pred = stacked_preds.mean(dim=0)  # [H, W]
+                        final_pred = mean_pred
+                    elif sentence_aggregation == 'mean_iou':
+                        # 对所有IoU取平均，但使用平均预测（公平且实用）
+                        stacked_preds = torch.stack(all_pred_masks, dim=0)  # [N, H, W]
+                        mean_pred = stacked_preds.mean(dim=0)  # [H, W]
+                        final_pred = mean_pred
+                    elif sentence_aggregation == 'median':
+                        # 选择IoU中位数的预测
+                        median_idx = np.argsort(sentence_ious)[len(sentence_ious) // 2]
+                        final_pred = all_pred_masks[median_idx]
+                    elif sentence_aggregation == 'first':
+                        # 使用第一个描述（默认行为）
+                        final_pred = all_pred_masks[0]
+                    else:
+                        # 默认使用平均方式
+                        stacked_preds = torch.stack(all_pred_masks, dim=0)
+                        final_pred = stacked_preds.mean(dim=0)
                     
-                    if best_pred is None:
-                        # 如果没有找到，使用第一个描述的结果
-                        word_ids_i = all_word_ids_i[0].unsqueeze(0).to(device, non_blocking=True)
-                        word_masks_i = all_word_masks_i[0].unsqueeze(0).to(device, non_blocking=True)
-                        pred_mask_i = model(img_i, word_ids_i, word_masks_i, use_negative_masks=use_negative_masks)
-                        if pred_mask_i.ndim == 4:
-                            pred_mask_i = pred_mask_i.squeeze(1)
-                        best_pred = pred_mask_i[0]
-                    
-                    best_pred_masks.append(best_pred)
+                    final_pred_masks.append(final_pred)
                 
-                pred_masks = torch.stack(best_pred_masks, dim=0)
+                pred_masks = torch.stack(final_pred_masks, dim=0)
             else:
                 # 使用提供的描述进行推理
                 word_ids = samples['word_ids'].to(device, non_blocking=True)
@@ -192,6 +229,9 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                 if pred_masks.ndim == 4:
                     pred_masks = pred_masks.squeeze(1)
 
+            # 保存未二值化的预测用于pointM计算
+            pred_masks_raw = pred_masks.clone()
+            
             # 显式二值化处理（避免预测值不在0/1）
             pred_masks = (pred_masks > 0.5).float()
 
@@ -205,7 +245,7 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                 print(f"Batch {batch_idx} - Pred stats: min={pred_min:.4f}, max={pred_max:.4f}, mean={pred_mean:.4f}")
                 print(f"Batch {batch_idx} - Target stats: min={target_min:.4f}, max={target_max:.4f}, mean={target_mean:.4f}")
 
-            for pred, tgt in zip(pred_masks, target):
+            for idx, (pred, tgt) in enumerate(zip(pred_masks, target)):
                 pred_bool = pred.bool()
                 tgt_bool = tgt.bool()
 
@@ -215,6 +255,8 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                 tgt_sum = tgt_bool.sum().item()
 
                 ###### 👇 1. gIoU 计算（对所有样本）
+                # 注意：这里命名为gIoU，但对于有前景样本实际计算的是普通IoU
+                # 对于无目标样本，gIoU=1.0（预测为空且目标为空）或0.0（预测不为空但目标为空）
                 if tgt_sum == 0:  # 无目标样本
                     total_nt_samples += 1
                     if pred_sum == 0:
@@ -228,7 +270,8 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                     total_intersection += intersection
                     total_union += union
                     best_iou = max(best_iou, giou)
-                    all_pointms.append(calculate_point_metric(pred, tgt))
+                    # pointM需要使用未二值化的预测（概率值）
+                    all_pointms.append(calculate_point_metric(pred_masks_raw[idx], tgt))
 
                 all_gious.append(giou)  # 所有样本都进 gIoU
 

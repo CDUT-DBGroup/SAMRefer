@@ -406,11 +406,13 @@ def evaluate_four_datasets():
             pin_memory=True,
             collate_fn=collate_fn
         )
-        # 支持通过args传递use_negative_masks和use_best_sentence参数
+        # 支持通过args传递use_negative_masks、use_best_sentence和sentence_aggregation参数
         use_negative_masks = getattr(args, 'use_negative_masks', False)
+        sentence_aggregation = getattr(args, 'sentence_aggregation', 'mean')  # 默认使用平均方式（更公平）
         metrics = validate(eval_model, val_loader, device, use_fp16=use_fp16, use_bf16=use_bf16, 
-                          use_negative_masks=use_negative_masks, use_best_sentence=use_best_sentence)
-        logger.info(f"\nValidation Results for {name} (use_negative_masks={use_negative_masks}, use_best_sentence={use_best_sentence}):")
+                          use_negative_masks=use_negative_masks, use_best_sentence=use_best_sentence,
+                          sentence_aggregation=sentence_aggregation)
+        logger.info(f"\nValidation Results for {name} (use_negative_masks={use_negative_masks}, use_best_sentence={use_best_sentence}, aggregation={sentence_aggregation}):")
         logger.info(f"mIoU: {metrics['mIoU']:.4f}")
         logger.info(f"oIoU: {metrics['oIoU']:.4f}")
         logger.info(f"gIoU: {metrics['gIoU']:.4f}")
