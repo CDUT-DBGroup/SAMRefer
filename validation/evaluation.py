@@ -201,10 +201,12 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                         mean_pred = stacked_preds.mean(dim=0)  # [H, W]
                         final_pred = mean_pred
                     elif sentence_aggregation == 'mean_iou':
-                        # 对所有IoU取平均，但使用平均预测（公平且实用）
-                        stacked_preds = torch.stack(all_pred_masks, dim=0)  # [N, H, W]
-                        mean_pred = stacked_preds.mean(dim=0)  # [H, W]
-                        final_pred = mean_pred
+                        # 对所有IoU取平均，然后选择IoU最接近平均值的预测
+                        mean_iou_value = np.mean(sentence_ious)
+                        # 找到IoU最接近平均值的索引
+                        iou_diffs = [abs(iou - mean_iou_value) for iou in sentence_ious]
+                        closest_idx = np.argmin(iou_diffs)
+                        final_pred = all_pred_masks[closest_idx]
                     elif sentence_aggregation == 'median':
                         # 选择IoU中位数的预测
                         median_idx = np.argsort(sentence_ious)[len(sentence_ious) // 2]

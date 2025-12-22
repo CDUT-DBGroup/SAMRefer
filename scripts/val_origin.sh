@@ -16,5 +16,5 @@ conda activate SAM
 # 设置随机种子
 export PYTHONHASHSEED=123456
 NUM_GPUS=1
-python validate_origin.py --config configs/main_origin.yaml --use_best_sentence --sentence_aggregation mean_iou > 我的论文模型的验证集-model_origin-使用meanIoU.log 2>&1 &
+python validate_origin.py --config configs/main_origin.yaml --use_best_sentence --sentence_aggregation mean_iou > 我的论文模型的验证集-model_origin-1222-使用meanIoU.log 2>&1 &
 
