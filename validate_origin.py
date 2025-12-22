@@ -447,6 +447,7 @@ def evaluate_four_datasets():
         logger.info(f"mIoU: {metrics['mIoU']:.4f}")
         logger.info(f"oIoU: {metrics['oIoU']:.4f}")
         logger.info(f"gIoU: {metrics['gIoU']:.4f}")
+        logger.info(f"cIoU: {metrics['cIoU']:.4f}")
         logger.info(f"Acc: {metrics['Acc']:.4f}")
         logger.info(f"pointM: {metrics['pointM']:.4f}")
         logger.info(f"best_IoU: {metrics['best_IoU']:.4f}")
