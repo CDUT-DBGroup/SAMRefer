@@ -294,66 +294,66 @@ def create_datasets(args):
         #         'size': getattr(args, 'img_size', 320)
         #     }
         # },
-        # {
-        #     'name': 'grefcoco',
-        #     'class': GRefDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'grefcoco',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'val',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
-        # {
-        #     'name': 'grefcoco',
-        #     'class': GRefDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'grefcoco',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'testA',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
-        # {
-        #     'name': 'grefcoco',
-        #     'class': GRefDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'grefcoco',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'testB',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
         {
-            'name': 'ref-zom',
-            'class': ReferzomDataset,
+            'name': 'grefcoco',
+            'class': GRefDataset,
             'kwargs': {
                 'refer_data_root': args.data_root,
-                'dataset': 'ref-zom',
-                'splitBy': 'final',
+                'dataset': 'grefcoco',
+                'splitBy': 'unc',
                 'bert_tokenizer': args.tokenizer_type,
                 'max_tokens': getattr(args, 'max_tokens', 30),
-                'split': 'test',
+                'split': 'val',
                 'eval_mode': False,
                 'size': getattr(args, 'img_size', 320),
                 'precision': args.precision
             }
-        }
+        },
+        {
+            'name': 'grefcoco',
+            'class': GRefDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'grefcoco',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testA',
+                'eval_mode': False,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        {
+            'name': 'grefcoco',
+            'class': GRefDataset,
+            'kwargs': {
+                'refer_data_root': args.data_root,
+                'dataset': 'grefcoco',
+                'splitBy': 'unc',
+                'bert_tokenizer': args.tokenizer_type,
+                'max_tokens': getattr(args, 'max_tokens', 30),
+                'split': 'testB',
+                'eval_mode': False,
+                'size': getattr(args, 'img_size', 320),
+                'precision': args.precision
+            }
+        },
+        # {
+        #     'name': 'ref-zom',
+        #     'class': ReferzomDataset,
+        #     'kwargs': {
+        #         'refer_data_root': args.data_root,
+        #         'dataset': 'ref-zom',
+        #         'splitBy': 'final',
+        #         'bert_tokenizer': args.tokenizer_type,
+        #         'max_tokens': getattr(args, 'max_tokens', 30),
+        #         'split': 'test',
+        #         'eval_mode': False,
+        #         'size': getattr(args, 'img_size', 320),
+        #         'precision': args.precision
+        #     }
+        # }
     ]
 
     datasets = []

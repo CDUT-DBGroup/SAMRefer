@@ -78,6 +78,109 @@ def calculate_point_metric(pred_mask, target_mask, num_points=100):
     return score.item()
 
 
+def get_bbox_from_mask(mask):
+    """
+    从mask中提取边界框 [x1, y1, x2, y2]
+    如果mask为空，返回 [0, 0, 0, 0]
+    """
+    if mask.sum() == 0:
+        return torch.tensor([0, 0, 0, 0], device=mask.device, dtype=torch.float32)
+    
+    h, w = mask.shape
+    coords = torch.nonzero(mask, as_tuple=False)
+    if len(coords) == 0:
+        return torch.tensor([0, 0, 0, 0], device=mask.device, dtype=torch.float32)
+    
+    y_min = coords[:, 0].min().item()
+    y_max = coords[:, 0].max().item()
+    x_min = coords[:, 1].min().item()
+    x_max = coords[:, 1].max().item()
+    
+    return torch.tensor([x_min, y_min, x_max, y_max], device=mask.device, dtype=torch.float32)
+
+
+def calculate_ciou(pred_mask, target_mask):
+    """
+    计算Complete IoU (cIoU) for segmentation masks
+    cIoU = IoU - (d^2 / c^2) - alpha * v
+    其中：
+    - IoU: 标准IoU
+    - d: 预测和真实边界框中心点的欧氏距离
+    - c: 包围两个边界框的最小闭包区域的对角线长度
+    - v: 长宽比相似性度量
+    - alpha: 权重系数
+    """
+    # 计算标准IoU
+    pred_bool = pred_mask.bool()
+    tgt_bool = target_mask.bool()
+    
+    intersection = (pred_bool & tgt_bool).float().sum()
+    union = (pred_bool | tgt_bool).float().sum()
+    
+    if union == 0:
+        # 如果union为0，检查是否都是空mask
+        if intersection == 0:
+            return 1.0  # 两个都是空，完全匹配
+        else:
+            return 0.0  # 不应该发生，但安全处理
+    
+    iou = intersection / union
+    
+    # 获取边界框
+    pred_bbox = get_bbox_from_mask(pred_bool)
+    tgt_bbox = get_bbox_from_mask(tgt_bool)
+    
+    # 如果任一mask为空，返回IoU（因为没有边界框信息）
+    if (pred_bbox[2] - pred_bbox[0]) == 0 or (pred_bbox[3] - pred_bbox[1]) == 0:
+        if (tgt_bbox[2] - tgt_bbox[0]) == 0 or (tgt_bbox[3] - tgt_bbox[1]) == 0:
+            return iou.item()  # 两个都是空，返回IoU
+        else:
+            return 0.0  # 预测为空但目标不为空
+    if (tgt_bbox[2] - tgt_bbox[0]) == 0 or (tgt_bbox[3] - tgt_bbox[1]) == 0:
+        return 0.0  # 目标为空但预测不为空
+    
+    # 计算中心点
+    pred_cx = (pred_bbox[0] + pred_bbox[2]) / 2.0
+    pred_cy = (pred_bbox[1] + pred_bbox[3]) / 2.0
+    tgt_cx = (tgt_bbox[0] + tgt_bbox[2]) / 2.0
+    tgt_cy = (tgt_bbox[1] + tgt_bbox[3]) / 2.0
+    
+    # 计算中心点距离的平方
+    d_squared = (pred_cx - tgt_cx) ** 2 + (pred_cy - tgt_cy) ** 2
+    
+    # 计算最小闭包区域
+    enclose_x1 = min(pred_bbox[0].item(), tgt_bbox[0].item())
+    enclose_y1 = min(pred_bbox[1].item(), tgt_bbox[1].item())
+    enclose_x2 = max(pred_bbox[2].item(), tgt_bbox[2].item())
+    enclose_y2 = max(pred_bbox[3].item(), tgt_bbox[3].item())
+    
+    # 计算对角线长度的平方
+    c_squared = (enclose_x2 - enclose_x1) ** 2 + (enclose_y2 - enclose_y1) ** 2
+    
+    if c_squared == 0:
+        return iou.item()
+    
+    # 计算长宽比相似性
+    pred_w = pred_bbox[2] - pred_bbox[0]
+    pred_h = pred_bbox[3] - pred_bbox[1]
+    tgt_w = tgt_bbox[2] - tgt_bbox[0]
+    tgt_h = tgt_bbox[3] - tgt_bbox[1]
+    
+    # 避免除零
+    if pred_h == 0 or tgt_h == 0:
+        v = 0.0
+    else:
+        v = (4.0 / (np.pi ** 2)) * ((torch.atan(tgt_w / tgt_h) - torch.atan(pred_w / pred_h)) ** 2)
+    
+    # 计算alpha
+    alpha = v / ((1 - iou) + v + 1e-6)
+    
+    # 计算cIoU
+    ciou = iou - (d_squared / c_squared) - alpha * v
+    
+    return ciou.item()
+
+
 # def calculate_point_metric(pred_mask, target_mask, num_points=100):
 #     """Calculate point-based metric (pointM)"""
 #     pred_mask = pred_mask.bool()
@@ -118,6 +221,7 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
     correct_nt_preds = 0
 
     all_pointms = []
+    all_cious = []  # 存储所有cIoU值
     best_iou = 0.0
 
     # 获取数据集对象以访问所有描述
@@ -267,13 +371,21 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                     else:
                         giou = 0.0
                 else:  # 有前景目标
-                    giou = intersection / (union + 1e-6)
+                    # 修复：当union为0时应该特殊处理
+                    if union == 0:
+                        giou = 1.0 if intersection == 0 else 0.0
+                    else:
+                        giou = intersection / union
+                    
                     all_ious.append(giou)  # 仅对前景样本累计 mIoU
                     total_intersection += intersection
                     total_union += union
                     best_iou = max(best_iou, giou)
                     # pointM需要使用未二值化的预测（概率值）
                     all_pointms.append(calculate_point_metric(pred_masks_raw[idx], tgt))
+                    # 计算cIoU（仅对前景样本）
+                    ciou = calculate_ciou(pred_bool, tgt_bool)
+                    all_cious.append(ciou)
 
                 all_gious.append(giou)  # 所有样本都进 gIoU
 
@@ -282,12 +394,14 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
     avg_pointm = np.mean(all_pointms) if all_pointms else 0.0
     overall_iou = total_intersection / total_union if total_union > 0 else 0.0
     avg_giou = np.mean(all_gious) if all_gious else 0.0
+    avg_ciou = np.mean(all_cious) if all_cious else 0.0  # 只针对前景样本
     acc = correct_nt_preds / total_nt_samples if total_nt_samples > 0 else 0.0
 
     return {
         'mIoU': avg_miou,         # 只针对前景样本
         'oIoU': overall_iou,      # 前景样本的累计交并比
         'gIoU': avg_giou,         # 所有样本（包括无目标）综合平均IoU
+        'cIoU': avg_ciou,         # 只针对前景样本的Complete IoU
         'Acc': acc,               # 无目标样本准确率
         'pointM': avg_pointm,
         'best_IoU': best_iou
