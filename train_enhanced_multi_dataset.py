@@ -3,12 +3,12 @@
 Enhanced training script for multi-dataset training with improved loss functions
 使用增强损失函数的多数据集训练脚本
 """
-import filelock
-filelock.FileLock = filelock.SoftFileLock
-import deepspeed.ops.transformer.inference.triton.matmul_ext as matmul_ext
+# import filelock
+# filelock.FileLock = filelock.SoftFileLock
+# import deepspeed.ops.transformer.inference.triton.matmul_ext as matmul_ext
 
-matmul_ext.FileLock = filelock.SoftFileLock
-print(">>> Patched matmul_ext.FileLock -> SoftFileLock")
+# matmul_ext.FileLock = filelock.SoftFileLock
+# print(">>> Patched matmul_ext.FileLock -> SoftFileLock")
 import os
 import sys
 import torch
@@ -22,7 +22,7 @@ from dataset.ReferDataset import ReferDataset
 from dataset.RefzomDataset import ReferzomDataset
 from get_args import get_args
 from model.enhanced_builder import refersam_enhanced, refersam_original
-from validate_bert import evaluate_four_datasets
+from validate import evaluate_four_datasets
 from validation.evaluation import validate
 import logging
 import datetime
@@ -176,19 +176,19 @@ def main():
         logger.info("Creating multi-dataset...")
     
     # RefCOCO
-    train_dataset_coco = MultiDatasetWrapper(
-        ReferDataset(
-            refer_data_root=args.data_root,
-            dataset='refcoco',
-            splitBy='unc',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'refcoco'
-    )
+    # train_dataset_coco = MultiDatasetWrapper(
+    #     ReferDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='refcoco',
+    #         splitBy='unc',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'refcoco'
+    # )
     
     # RefCOCO+
     train_dataset_refcocoplus = MultiDatasetWrapper(
@@ -206,72 +206,61 @@ def main():
      )
     
     # # RefCOCOg
-    train_dataset_refcocog = MultiDatasetWrapper(
-         ReferDataset(
-             refer_data_root=args.data_root,
-             dataset='refcocog',
-             splitBy='umd',
-             bert_tokenizer=args.tokenizer_type,
-             max_tokens=getattr(args, 'max_tokens', 30),
-             split='train',
-             eval_mode=False,
-             size=getattr(args, 'img_size', 320),
-             precision=args.precision
-         ), 'refcocog'
-    )
+    # train_dataset_refcocog = MultiDatasetWrapper(
+    #      ReferDataset(
+    #          refer_data_root=args.data_root,
+    #          dataset='refcocog',
+    #          splitBy='umd',
+    #          bert_tokenizer=args.tokenizer_type,
+    #          max_tokens=getattr(args, 'max_tokens', 30),
+    #          split='train',
+    #          eval_mode=False,
+    #          size=getattr(args, 'img_size', 320),
+    #          precision=args.precision
+    #      ), 'refcocog'
+    # )
     
-    # # Ref-ZOM
-    train_dataset_zom = MultiDatasetWrapper(
-         ReferzomDataset(
-             refer_data_root=args.data_root,
-             dataset='ref-zom',
-             splitBy='final',
-             bert_tokenizer=args.tokenizer_type,
-             max_tokens=getattr(args, 'max_tokens', 30),
-             split='train',
-             eval_mode=False,
-             size=getattr(args, 'img_size', 320),
-             precision=args.precision
-         ), 'ref-zom'
-     )
+    # # # Ref-ZOM
+    # train_dataset_zom = MultiDatasetWrapper(
+    #      ReferzomDataset(
+    #          refer_data_root=args.data_root,
+    #          dataset='ref-zom',
+    #          splitBy='final',
+    #          bert_tokenizer=args.tokenizer_type,
+    #          max_tokens=getattr(args, 'max_tokens', 30),
+    #          split='train',
+    #          eval_mode=False,
+    #          size=getattr(args, 'img_size', 320),
+    #          precision=args.precision
+    #      ), 'ref-zom'
+    #  )
 
-    train_dataset_gref = MultiDatasetWrapper(
-         GRefDataset(
-             refer_data_root=args.data_root,
-             dataset='grefcoco',
-             splitBy='unc',
-             bert_tokenizer=args.tokenizer_type,
-             max_tokens=getattr(args, 'max_tokens', 30),
-             split='train',
-             eval_mode=False,
-             size=getattr(args, 'img_size', 320),
-             precision=args.precision
-         ), 'grefcoco'
-    )
+    # train_dataset_gref = MultiDatasetWrapper(
+    #      GRefDataset(
+    #          refer_data_root=args.data_root,
+    #          dataset='grefcoco',
+    #          splitBy='unc',
+    #          bert_tokenizer=args.tokenizer_type,
+    #          max_tokens=getattr(args, 'max_tokens', 30),
+    #          split='train',
+    #          eval_mode=False,
+    #          size=getattr(args, 'img_size', 320),
+    #          precision=args.precision
+    #      ), 'grefcoco'
+    # )
     # 合并所有训练数据集
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_refcocog,
-        train_dataset_zom,
-        train_dataset_gref,
-        train_dataset_coco,
+        # train_dataset_refcocog,
+        # train_dataset_zom,
+        # train_dataset_gref,
+        # train_dataset_coco,
         train_dataset_refcocoplus
     ])
     
     # 验证数据集（使用RefCOCO）
-    val_dataset_coco = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    # val_dataset_refcocoplus = ReferDataset(
+    # val_dataset_coco = ReferDataset(
     #     refer_data_root=args.data_root,
-    #     dataset='refcoco+',
+    #     dataset='refcoco',
     #     splitBy='unc',
     #     bert_tokenizer=args.tokenizer_type,
     #     max_tokens=getattr(args, 'max_tokens', 30),
@@ -280,13 +269,24 @@ def main():
     #     size=getattr(args, 'img_size', 320),
     #     precision=args.precision
     # )
-    val_dataset = torch.utils.data.ConcatDataset([val_dataset_coco])
+    val_dataset_refcocoplus = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco+',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='val',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
+    val_dataset = torch.utils.data.ConcatDataset([val_dataset_refcocoplus])
 
     if logger:
         logger.info("Creating data loaders...")
-        logger.info(f"Total training samples: {len(train_dataset)}")
-        logger.info(f"  - RefCOCO: {len(train_dataset_coco)}")
-        # logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
+        # logger.info(f"Total training samples: {len(train_dataset)}")
+        # logger.info(f"  - RefCOCO: {len(train_dataset_coco)}")
+        logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
         # logger.info(f"  - RefCOCOg: {len(train_dataset_refcocog)}")
         # logger.info(f"  - Ref-ZOM: {len(train_dataset_zom)}")
         logger.info(f"Total validation samples: {len(val_dataset)}")

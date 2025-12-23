@@ -23,16 +23,16 @@ NUM_GPUS=1
 # deepspeed visual/visualize_inference.py --mode dataset --dataset_name refcoco --split val --sample_idx 10 --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json
 deepspeed visual/visualize_inference.py \
     --mode single \
-    --image_path /root/autodl-tmp/vision_paper/ReferSAM/visual/test_img/COCO_val2014_000000000074.jpg \
-    --sentence "a dog" \
+    --image_path visual/test_img/COCO_val2014_000000000785.jpg \
+    --sentence "The woman skiing on the left" \
     --output_img_path /root/autodl-tmp/vision_paper/ReferSAM/visual/test_img/results \
     --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json
 
 deepspeed visual/visualize_inference.py \
     --mode single \
-    --image_path /root/autodl-tmp/vision_paper/ReferSAM/visual/test_img/COCO_val2014_000000000074.jpg \
+    --image_path visual/test_img/COCO_val2014_000000000785.jpg \
     --config configs/main_origin.yaml \
-    --use_model_origin \
-    --sentence "the bike" \
+    --sentence "The woman smiling while skiing on the left side of the picture" \
     --output_img_path /root/autodl-tmp/vision_paper/ReferSAM/visual/test_img/results_origin \
-    --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json
+    --deepspeed_config /root/autodl-tmp/vision_paper/ReferSAM/configs/ds_config.json \
+    --use_model_origin \

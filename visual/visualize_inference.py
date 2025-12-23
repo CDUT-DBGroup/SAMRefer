@@ -8,6 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.patches import Rectangle
+from matplotlib import cm
+from scipy import ndimage
 import torchvision.transforms.functional as TF
 from torchvision import transforms
 from PIL import Image
@@ -89,15 +91,19 @@ def visualize_inference_with_bbox(image_tensor, pred_mask, sentence, save_path,
             # 如果是 [C, H, W] 格式，转换为 [H, W, C]
             image = image.transpose(1, 2, 0)
     
-    # 处理预测mask
+    # 处理预测mask（保存原始值用于热力图）
     if isinstance(pred_mask, torch.Tensor):
-        pred_mask = pred_mask.cpu().numpy()
-    if pred_mask.ndim == 3:
-        pred_mask = pred_mask.squeeze(0)
-    if pred_mask.ndim == 2:
-        pred_mask_bool = pred_mask > 0.5  # 二值化
+        pred_mask_raw = pred_mask.cpu().numpy()
     else:
-        pred_mask_bool = pred_mask.astype(bool)
+        pred_mask_raw = np.array(pred_mask)
+    if pred_mask_raw.ndim == 3:
+        pred_mask_raw = pred_mask_raw.squeeze(0)
+    # 保存原始mask值用于热力图
+    pred_mask_original = pred_mask_raw.copy()
+    if pred_mask_raw.ndim == 2:
+        pred_mask_bool = pred_mask_raw > 0.5  # 二值化
+    else:
+        pred_mask_bool = pred_mask_raw.astype(bool)
     
     # 从mask中提取bounding box（仅在需要显示box时计算）
     pred_bbox = None
@@ -118,17 +124,48 @@ def visualize_inference_with_bbox(image_tensor, pred_mask, sentence, save_path,
     axes[0].set_title('original image', fontsize=14, fontweight='bold')
     axes[0].axis('off')
     
-    # 第二个子图：原图 + 预测mask叠加
+    # 第二个子图：原图 + 预测mask叠加（热力图效果）
     axes[1].imshow(image)
     
-    # 绘制预测的mask（半透明叠加）
+    # 绘制预测的mask（热力图效果）
     if pred_mask_bool.sum() > 0:
-        # 创建彩色mask
-        color_mask = np.zeros_like(image)
-        color_mask[:, :, 0] = 1.0  # 红色通道
-        color_mask[:, :, 1] = 0.0
-        color_mask[:, :, 2] = 0.0
-        axes[1].imshow(color_mask, alpha=0.3 * pred_mask_bool.astype(float))
+        # 创建热力图mask：使用原始pred_mask值来创建渐变效果
+        heatmap_data = pred_mask_original.copy()
+        # 归一化到0-1范围
+        if heatmap_data.max() > heatmap_data.min():
+            heatmap_data = (heatmap_data - heatmap_data.min()) / (heatmap_data.max() - heatmap_data.min())
+        else:
+            # 如果所有值相同，使用二值mask
+            heatmap_data = pred_mask_bool.astype(float)
+        
+        # 只在mask区域内应用热力图，并对边界进行平滑处理
+        heatmap_data = heatmap_data * pred_mask_bool.astype(float)
+        # 对mask进行轻微的高斯模糊以创建平滑的热力图效果
+        heatmap_data = ndimage.gaussian_filter(heatmap_data, sigma=1.5)
+        # 重新应用mask区域
+        heatmap_data = heatmap_data * pred_mask_bool.astype(float)
+        
+        # 使用'hot' colormap创建热力图（从黑到红到黄，效果更明显）
+        # 也可以使用'jet'（蓝到红）或'coolwarm'等其他colormap
+        colormap = cm.get_cmap('hot')  # 'hot': 黑->红->黄
+        heatmap_colored = colormap(heatmap_data)
+        
+        # 只显示mask区域，背景保持透明，使用更高的不透明度使效果更明显
+        heatmap_colored[:, :, 3] = heatmap_data * 0.75  # alpha通道，0.75的不透明度
+        
+        axes[1].imshow(heatmap_colored)
+        
+        # 添加轮廓线来突出mask边界，使效果更明显
+        # 使用scipy的方法计算边界（更可靠，不需要额外依赖）
+        boundary = pred_mask_bool.astype(float) - ndimage.binary_erosion(pred_mask_bool, iterations=1).astype(float)
+        if boundary.sum() > 0:
+            # 绘制青色轮廓线
+            boundary_colored = np.zeros((*boundary.shape, 4))
+            boundary_colored[:, :, 0] = 0.0  # R
+            boundary_colored[:, :, 1] = 1.0  # G
+            boundary_colored[:, :, 2] = 1.0  # B (青色)
+            boundary_colored[:, :, 3] = boundary * 0.95  # alpha通道
+            axes[1].imshow(boundary_colored)
         
         # 可选：绘制预测的bounding box
         if show_bbox and pred_bbox is not None:
@@ -138,7 +175,7 @@ def visualize_inference_with_bbox(image_tensor, pred_mask, sentence, save_path,
                     pred_bbox[2] - pred_bbox[0],
                     pred_bbox[3] - pred_bbox[1],
                     linewidth=3,
-                    edgecolor='red',
+                    edgecolor='cyan',
                     facecolor='none',
                     label='预测框'
                 )
