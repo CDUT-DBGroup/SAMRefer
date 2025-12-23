@@ -221,7 +221,9 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
     correct_nt_preds = 0
 
     all_pointms = []
-    all_cious = []  # 存储所有cIoU值
+    # cIoU: 所有样本的总交集像素数除以总并集像素数
+    total_ciou_intersection = 0.0
+    total_ciou_union = 0.0
     best_iou = 0.0
 
     # 获取数据集对象以访问所有描述
@@ -360,9 +362,26 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                 pred_sum = pred_bool.sum().item()
                 tgt_sum = tgt_bool.sum().item()
 
-                ###### 👇 1. gIoU 计算（对所有样本）
+                ###### 👇 计算当前样本的IoU（用于mIoU和oIoU，包含所有样本）
+                # 对于所有样本都计算IoU
+                if union == 0:
+                    sample_iou = 1.0 if intersection == 0 else 0.0
+                else:
+                    sample_iou = intersection / union
+                
+                # mIoU和oIoU: 累计所有样本（包括无目标样本）
+                all_ious.append(sample_iou)
+                total_intersection += intersection
+                total_union += union
+                
+                ###### 👇 gIoU 计算（对所有样本）
                 # 注意：这里命名为gIoU，但对于有前景样本实际计算的是普通IoU
                 # 对于无目标样本，gIoU=1.0（预测为空且目标为空）或0.0（预测不为空但目标为空）
+                
+                # cIoU: 累计所有样本的intersection和union（包括无目标样本）
+                total_ciou_intersection += intersection
+                total_ciou_union += union
+                
                 if tgt_sum == 0:  # 无目标样本
                     total_nt_samples += 1
                     if pred_sum == 0:
@@ -371,21 +390,10 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                     else:
                         giou = 0.0
                 else:  # 有前景目标
-                    # 修复：当union为0时应该特殊处理
-                    if union == 0:
-                        giou = 1.0 if intersection == 0 else 0.0
-                    else:
-                        giou = intersection / union
-                    
-                    all_ious.append(giou)  # 仅对前景样本累计 mIoU
-                    total_intersection += intersection
-                    total_union += union
+                    giou = sample_iou  # 有前景目标时，gIoU等于普通IoU
                     best_iou = max(best_iou, giou)
                     # pointM需要使用未二值化的预测（概率值）
                     all_pointms.append(calculate_point_metric(pred_masks_raw[idx], tgt))
-                    # 计算cIoU（仅对前景样本）
-                    ciou = calculate_ciou(pred_bool, tgt_bool)
-                    all_cious.append(ciou)
 
                 all_gious.append(giou)  # 所有样本都进 gIoU
 
@@ -394,14 +402,15 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
     avg_pointm = np.mean(all_pointms) if all_pointms else 0.0
     overall_iou = total_intersection / total_union if total_union > 0 else 0.0
     avg_giou = np.mean(all_gious) if all_gious else 0.0
-    avg_ciou = np.mean(all_cious) if all_cious else 0.0  # 只针对前景样本
+    # cIoU: 所有样本的总交集像素数除以总并集像素数
+    avg_ciou = total_ciou_intersection / total_ciou_union if total_ciou_union > 0 else 0.0
     acc = correct_nt_preds / total_nt_samples if total_nt_samples > 0 else 0.0
 
     return {
-        'mIoU': avg_miou,         # 只针对前景样本
-        'oIoU': overall_iou,      # 前景样本的累计交并比
+        'mIoU': avg_miou,         # 所有样本的平均IoU（包括无目标样本）
+        'oIoU': overall_iou,      # 所有样本的累计交并比（总交集/总并集）
         'gIoU': avg_giou,         # 所有样本（包括无目标）综合平均IoU
-        'cIoU': avg_ciou,         # 只针对前景样本的Complete IoU
+        'cIoU': avg_ciou,         # 所有样本的累计IoU（总交集/总并集）
         'Acc': acc,               # 无目标样本准确率
         'pointM': avg_pointm,
         'best_IoU': best_iou
