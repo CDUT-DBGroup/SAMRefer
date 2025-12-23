@@ -22,7 +22,7 @@ from dataset.ReferDataset import ReferDataset
 from dataset.RefzomDataset import ReferzomDataset
 from get_args import get_args
 from model.enhanced_builder import refersam_enhanced, refersam_original
-from validate_bert import evaluate_four_datasets
+from validate import evaluate_four_datasets
 from validation.evaluation import validate
 import logging
 import datetime
@@ -34,6 +34,7 @@ from deepspeed.ops.adam import DeepSpeedCPUAdam
 import json
 import shutil
 import argparse
+import socket
 
 # 内存优化设置
 torch.backends.cudnn.benchmark = True
@@ -83,6 +84,75 @@ def count_parameters(model):
     return total_params, trainable_params
 
 
+def find_available_port(start_port=29500, max_attempts=100):
+    """
+    查找一个可用的端口
+    
+    Args:
+        start_port: 起始端口号
+        max_attempts: 最大尝试次数
+    
+    Returns:
+        可用的端口号，如果找不到则返回 None
+    """
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('', port))
+                return port
+        except OSError:
+            continue
+    return None
+
+
+def setup_master_port():
+    """
+    设置MASTER_PORT环境变量，如果未设置或端口不可用，则自动查找可用端口
+    """
+    if 'MASTER_PORT' not in os.environ:
+        # 如果未设置，尝试从默认端口29500开始查找
+        default_port = 29500
+        available_port = find_available_port(start_port=default_port, max_attempts=100)
+        if available_port is None:
+            # 如果默认端口范围都不可用，尝试从 20000 开始
+            available_port = find_available_port(start_port=20000, max_attempts=100)
+        
+        if available_port is not None:
+            os.environ['MASTER_PORT'] = str(available_port)
+            print(f"[INFO] 自动查找可用端口: {available_port}")
+        else:
+            # 如果仍然找不到可用端口，使用默认值（可能会失败，但至少尝试）
+            os.environ['MASTER_PORT'] = str(default_port)
+            print(f"[WARNING] 无法找到可用端口，使用默认端口: {default_port}")
+    else:
+        # 如果用户已经设置了端口，验证它是否可用
+        try:
+            user_port = int(os.environ['MASTER_PORT'])
+            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                test_socket.bind(('', user_port))
+                test_socket.close()
+                print(f"[INFO] 使用用户指定的端口: {user_port}")
+            except OSError:
+                # 用户指定的端口不可用，尝试查找替代端口
+                print(f"[WARNING] 用户指定的端口 {user_port} 不可用，正在查找替代端口...")
+                available_port = find_available_port(start_port=20000, max_attempts=100)
+                if available_port is not None:
+                    os.environ['MASTER_PORT'] = str(available_port)
+                    print(f"[INFO] 使用替代端口: {available_port}")
+                else:
+                    print(f"[WARNING] 无法找到替代端口，保持用户指定的端口: {user_port}")
+        except (ValueError, OSError) as e:
+            print(f"[WARNING] 无效或不可用的端口 {os.environ['MASTER_PORT']}: {e}")
+            # 尝试查找替代端口
+            available_port = find_available_port(start_port=20000, max_attempts=100)
+            if available_port is not None:
+                os.environ['MASTER_PORT'] = str(available_port)
+                print(f"[INFO] 使用替代端口: {available_port}")
+
+
 class MultiDatasetWrapper:
     """Wrapper to add dataset name to samples"""
     def __init__(self, dataset, dataset_name):
@@ -104,6 +174,10 @@ def main():
     # 设置分布式超时，防止卡死（30分钟超时）
     os.environ['NCCL_TIMEOUT'] = '1800'  # 30分钟
     os.environ['GLOO_TIMEOUT_SECONDS'] = '1800'  # 30分钟
+    
+    # 自动查找并设置可用端口
+    setup_master_port()
+    
     # 初始化 DeepSpeed
     deepspeed.init_distributed()
     
@@ -176,19 +250,19 @@ def main():
         logger.info("Creating multi-dataset...")
     
     # RefCOCO
-    train_dataset_coco = MultiDatasetWrapper(
-        ReferDataset(
-            refer_data_root=args.data_root,
-            dataset='refcoco',
-            splitBy='unc',
-            bert_tokenizer=args.tokenizer_type,
-            max_tokens=getattr(args, 'max_tokens', 30),
-            split='train',
-            eval_mode=False,
-            size=getattr(args, 'img_size', 320),
-            precision=args.precision
-        ), 'refcoco'
-    )
+    # train_dataset_coco = MultiDatasetWrapper(
+    #     ReferDataset(
+    #         refer_data_root=args.data_root,
+    #         dataset='refcoco',
+    #         splitBy='unc',
+    #         bert_tokenizer=args.tokenizer_type,
+    #         max_tokens=getattr(args, 'max_tokens', 30),
+    #         split='train',
+    #         eval_mode=False,
+    #         size=getattr(args, 'img_size', 320),
+    #         precision=args.precision
+    #     ), 'refcoco'
+    # )
     
     # RefCOCO+
     train_dataset_refcocoplus = MultiDatasetWrapper(
@@ -206,72 +280,61 @@ def main():
      )
     
     # # RefCOCOg
-    train_dataset_refcocog = MultiDatasetWrapper(
-         ReferDataset(
-             refer_data_root=args.data_root,
-             dataset='refcocog',
-             splitBy='umd',
-             bert_tokenizer=args.tokenizer_type,
-             max_tokens=getattr(args, 'max_tokens', 30),
-             split='train',
-             eval_mode=False,
-             size=getattr(args, 'img_size', 320),
-             precision=args.precision
-         ), 'refcocog'
-    )
+    # train_dataset_refcocog = MultiDatasetWrapper(
+    #      ReferDataset(
+    #          refer_data_root=args.data_root,
+    #          dataset='refcocog',
+    #          splitBy='umd',
+    #          bert_tokenizer=args.tokenizer_type,
+    #          max_tokens=getattr(args, 'max_tokens', 30),
+    #          split='train',
+    #          eval_mode=False,
+    #          size=getattr(args, 'img_size', 320),
+    #          precision=args.precision
+    #      ), 'refcocog'
+    # )
     
-    # # Ref-ZOM
-    train_dataset_zom = MultiDatasetWrapper(
-         ReferzomDataset(
-             refer_data_root=args.data_root,
-             dataset='ref-zom',
-             splitBy='final',
-             bert_tokenizer=args.tokenizer_type,
-             max_tokens=getattr(args, 'max_tokens', 30),
-             split='train',
-             eval_mode=False,
-             size=getattr(args, 'img_size', 320),
-             precision=args.precision
-         ), 'ref-zom'
-     )
+    # # # Ref-ZOM
+    # train_dataset_zom = MultiDatasetWrapper(
+    #      ReferzomDataset(
+    #          refer_data_root=args.data_root,
+    #          dataset='ref-zom',
+    #          splitBy='final',
+    #          bert_tokenizer=args.tokenizer_type,
+    #          max_tokens=getattr(args, 'max_tokens', 30),
+    #          split='train',
+    #          eval_mode=False,
+    #          size=getattr(args, 'img_size', 320),
+    #          precision=args.precision
+    #      ), 'ref-zom'
+    #  )
 
-    train_dataset_gref = MultiDatasetWrapper(
-         GRefDataset(
-             refer_data_root=args.data_root,
-             dataset='grefcoco',
-             splitBy='unc',
-             bert_tokenizer=args.tokenizer_type,
-             max_tokens=getattr(args, 'max_tokens', 30),
-             split='train',
-             eval_mode=False,
-             size=getattr(args, 'img_size', 320),
-             precision=args.precision
-         ), 'grefcoco'
-    )
+    # train_dataset_gref = MultiDatasetWrapper(
+    #      GRefDataset(
+    #          refer_data_root=args.data_root,
+    #          dataset='grefcoco',
+    #          splitBy='unc',
+    #          bert_tokenizer=args.tokenizer_type,
+    #          max_tokens=getattr(args, 'max_tokens', 30),
+    #          split='train',
+    #          eval_mode=False,
+    #          size=getattr(args, 'img_size', 320),
+    #          precision=args.precision
+    #      ), 'grefcoco'
+    # )
     # 合并所有训练数据集
     train_dataset = torch.utils.data.ConcatDataset([
-        train_dataset_refcocog,
-        train_dataset_zom,
-        train_dataset_gref,
-        train_dataset_coco,
+        # train_dataset_refcocog,
+        # train_dataset_zom,
+        # train_dataset_gref,
+        # train_dataset_coco,
         train_dataset_refcocoplus
     ])
     
     # 验证数据集（使用RefCOCO）
-    val_dataset_coco = ReferDataset(
-        refer_data_root=args.data_root,
-        dataset='refcoco',
-        splitBy='unc',
-        bert_tokenizer=args.tokenizer_type,
-        max_tokens=getattr(args, 'max_tokens', 30),
-        split='val',
-        eval_mode=False,
-        size=getattr(args, 'img_size', 320),
-        precision=args.precision
-    )
-    # val_dataset_refcocoplus = ReferDataset(
+    # val_dataset_coco = ReferDataset(
     #     refer_data_root=args.data_root,
-    #     dataset='refcoco+',
+    #     dataset='refcoco',
     #     splitBy='unc',
     #     bert_tokenizer=args.tokenizer_type,
     #     max_tokens=getattr(args, 'max_tokens', 30),
@@ -280,7 +343,18 @@ def main():
     #     size=getattr(args, 'img_size', 320),
     #     precision=args.precision
     # )
-    val_dataset = torch.utils.data.ConcatDataset([val_dataset_coco])
+    val_dataset_refcocoplus = ReferDataset(
+        refer_data_root=args.data_root,
+        dataset='refcoco+',
+        splitBy='unc',
+        bert_tokenizer=args.tokenizer_type,
+        max_tokens=getattr(args, 'max_tokens', 30),
+        split='val',
+        eval_mode=False,
+        size=getattr(args, 'img_size', 320),
+        precision=args.precision
+    )
+    val_dataset = torch.utils.data.ConcatDataset([val_dataset_refcocoplus])
 
     if logger:
         logger.info("Creating data loaders...")

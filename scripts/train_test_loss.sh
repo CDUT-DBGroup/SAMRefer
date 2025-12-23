@@ -5,7 +5,7 @@
 #!/bin/bash
 # 优化后的训练脚本
 # 使用改进的模型架构、训练策略和数据增强
-
+pkill -f train_enhanced_multi_dataset.py
 echo "Starting optimized ReferSAM training..."
 
 # 首先检查 CUDA 是否可用
