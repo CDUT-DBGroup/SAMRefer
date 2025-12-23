@@ -176,34 +176,34 @@ def main():
         logger.info("Creating multi-dataset...")
     
     # RefCOCO
-    # train_dataset_coco = MultiDatasetWrapper(
-    #     ReferDataset(
-    #         refer_data_root=args.data_root,
-    #         dataset='refcoco',
-    #         splitBy='unc',
-    #         bert_tokenizer=args.tokenizer_type,
-    #         max_tokens=getattr(args, 'max_tokens', 30),
-    #         split='train',
-    #         eval_mode=False,
-    #         size=getattr(args, 'img_size', 320),
-    #         precision=args.precision
-    #     ), 'refcoco'
-    # )
+    train_dataset_coco = MultiDatasetWrapper(
+        ReferDataset(
+            refer_data_root=args.data_root,
+            dataset='refcoco',
+            splitBy='unc',
+            bert_tokenizer=args.tokenizer_type,
+            max_tokens=getattr(args, 'max_tokens', 30),
+            split='train',
+            eval_mode=False,
+            size=getattr(args, 'img_size', 320),
+            precision=args.precision
+        ), 'refcoco'
+    )
     
     # RefCOCO+
-    train_dataset_refcocoplus = MultiDatasetWrapper(
-         ReferDataset(
-             refer_data_root=args.data_root,
-             dataset='refcoco+',
-             splitBy='unc',
-             bert_tokenizer=args.tokenizer_type,
-             max_tokens=getattr(args, 'max_tokens', 30),
-             split='train',
-             eval_mode=False,
-             size=getattr(args, 'img_size', 320),
-             precision=args.precision
-         ), 'refcoco+'
-     )
+    # train_dataset_refcocoplus = MultiDatasetWrapper(
+    #      ReferDataset(
+    #          refer_data_root=args.data_root,
+    #          dataset='refcoco+',
+    #          splitBy='unc',
+    #          bert_tokenizer=args.tokenizer_type,
+    #          max_tokens=getattr(args, 'max_tokens', 30),
+    #          split='train',
+    #          eval_mode=False,
+    #          size=getattr(args, 'img_size', 320),
+    #          precision=args.precision
+    #      ), 'refcoco+'
+    #  )
     
     # # RefCOCOg
     # train_dataset_refcocog = MultiDatasetWrapper(
@@ -253,25 +253,14 @@ def main():
         # train_dataset_refcocog,
         # train_dataset_zom,
         # train_dataset_gref,
-        # train_dataset_coco,
-        train_dataset_refcocoplus
+        train_dataset_coco,
+        # train_dataset_refcocoplus
     ])
     
     # 验证数据集（使用RefCOCO）
-    # val_dataset_coco = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcoco',
-    #     splitBy='unc',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='val',
-    #     eval_mode=False,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
-    val_dataset_refcocoplus = ReferDataset(
+    val_dataset_coco = ReferDataset(
         refer_data_root=args.data_root,
-        dataset='refcoco+',
+        dataset='refcoco',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
         max_tokens=getattr(args, 'max_tokens', 30),
@@ -280,13 +269,24 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    val_dataset = torch.utils.data.ConcatDataset([val_dataset_refcocoplus])
+    # val_dataset_refcocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='val',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    val_dataset = torch.utils.data.ConcatDataset([val_dataset_coco])
 
     if logger:
         logger.info("Creating data loaders...")
         # logger.info(f"Total training samples: {len(train_dataset)}")
-        # logger.info(f"  - RefCOCO: {len(train_dataset_coco)}")
-        logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
+        logger.info(f"  - RefCOCO: {len(train_dataset_coco)}")
+        # logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
         # logger.info(f"  - RefCOCOg: {len(train_dataset_refcocog)}")
         # logger.info(f"  - Ref-ZOM: {len(train_dataset_zom)}")
         logger.info(f"Total validation samples: {len(val_dataset)}")

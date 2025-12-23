@@ -104,6 +104,7 @@ deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/main_refersam_bert.yaml \
     --use_enhanced_loss \
+    --use_lang_attention False \
     --loss_config_path configs/enhanced_loss_config.yaml \
      > "$LOG_FILE" 2>&1 &
 

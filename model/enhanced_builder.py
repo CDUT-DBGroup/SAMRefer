@@ -135,6 +135,7 @@ def _segm_refersam_enhanced(pretrained, args, criterion):
         'num_prompts': [16, 4],
         'num_extra_layers': 2,
         "num_prompt_layers": 2,
+        'use_lang_attention': getattr(args, 'use_lang_attention', True),  # 消融实验：默认使用文本注意力
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     

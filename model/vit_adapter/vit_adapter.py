@@ -15,10 +15,12 @@ class ViTAdapter(nn.Module):
     def __init__(self, vis_model, vis_dim, lang_dim, vl_dim, num_prompts=[10, 8], conv_inplane=64, n_points=4, deform_ratio=1.0, 
                  deform_num_heads=6, interaction_indexes=None, with_cffn=True, init_values=0.,
                  cffn_ratio=0.25, add_vit_feature=False, drop_path_rate=0., dropout=0.,
-                 with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=1, using_clip=True):
+                 with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=1, using_clip=True,
+                 use_lang_attention=True):
         
         super().__init__()
         self.using_clip = using_clip
+        self.use_lang_attention = use_lang_attention  # 消融实验开关：是否使用文本注意力
         self.vis_model = vis_model
         self.drop_path_rate = drop_path_rate
         self.interaction_indexes = interaction_indexes
@@ -59,22 +61,26 @@ class ViTAdapter(nn.Module):
         self.postional_encoding_prompter = SinePositionalEncoding(num_feats=out_dim//2, normalize=True)
         # 可学习的权重参数，用于组合基础token和加权聚合的文本特征
         # 初始化为接近原始权重0.7和0.3的值（通过logit空间：log(0.7/0.3) ≈ 0.85）
-        self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
+        # 只有在使用文本注意力时才需要融合权重
+        if self.use_lang_attention:
+            self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
         
         # vit_feats与c3融合的可学习权重（用于提升oIoU）
         self.vit_c3_fusion_weight = nn.Parameter(torch.tensor(0.3))
         
         # 改进：使用注意力机制聚合文本特征（替代简单的mean聚合）
         # 使用query-key-value注意力，更好地理解文本语义
-        self.lang_attention = nn.MultiheadAttention(
-            embed_dim=out_dim, 
-            num_heads=8, 
-            dropout=0.1,
-            batch_first=True
-        )
-        self.lang_attention_query = nn.Parameter(torch.randn(1, 1, out_dim))  # 可学习的query
-        # 初始化query
-        nn.init.normal_(self.lang_attention_query, std=0.02)
+        # 消融实验：可以通过use_lang_attention参数控制是否使用
+        if self.use_lang_attention:
+            self.lang_attention = nn.MultiheadAttention(
+                embed_dim=out_dim, 
+                num_heads=8, 
+                dropout=0.1,
+                batch_first=True
+            )
+            self.lang_attention_query = nn.Parameter(torch.randn(1, 1, out_dim))  # 可学习的query
+            # 初始化query
+            nn.init.normal_(self.lang_attention_query, std=0.02)
         self.prompt_blocks = nn.Sequential(*[
             PromptAttnLayer(out_dim, out_dim, out_dim, heads=8, mlp_ratio=4, n_levels=3, norm_layer=partial(nn.LayerNorm, eps=1e-6)) 
             for i in range(num_prompt_layers)
@@ -216,30 +222,35 @@ class ViTAdapter(nn.Module):
         # else:
         #     lang_g = lang_feats[:, 0].unsqueeze(1) # [B, 1, C], [CLS] embeddings
 
-        # # dense_prompts = lang_g.clone().detach()
-        # dense_prompts = lang_g.clone()
-        # 不使用单个token，而是使用注意力聚合
-# 在 model/vit_adapter/vit_adapter.py 第166-172行
-        if self.using_clip:
-            eos_index = lang_mask.sum(1).long() - 1
-            lang_g_base = lang_feats[torch.arange(bs), eos_index].unsqueeze(1)
+        # 消融实验：根据use_lang_attention参数决定是否使用文本注意力
+        if self.use_lang_attention:
+            # 使用注意力机制聚合文本特征
+            if self.using_clip:
+                eos_index = lang_mask.sum(1).long() - 1
+                lang_g_base = lang_feats[torch.arange(bs), eos_index].unsqueeze(1)
+            else:
+                lang_g_base = lang_feats[:, 0].unsqueeze(1)
+
+            # 使用可学习的query，更好地理解文本语义
+            lang_query = self.lang_attention_query.expand(bs, -1, -1)  # [B, 1, out_dim]
+            lang_g_attn, _ = self.lang_attention(
+                query=lang_query,
+                key=lang_feats,
+                value=lang_feats,
+                key_padding_mask=(1 - lang_mask).bool() if lang_mask is not None else None
+            )  # [B, 1, out_dim]
+            lang_g_attn = lang_g_attn.squeeze(1).unsqueeze(1)  # [B, 1, out_dim]
+
+            # 结合基础token和注意力聚合（使用可学习权重）
+            fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
+            lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_attn
         else:
-            lang_g_base = lang_feats[:, 0].unsqueeze(1)
-
-        # 改进：使用注意力机制聚合文本特征（替代简单的mean聚合）
-        # 使用可学习的query，更好地理解文本语义
-        lang_query = self.lang_attention_query.expand(bs, -1, -1)  # [B, 1, out_dim]
-        lang_g_attn, _ = self.lang_attention(
-            query=lang_query,
-            key=lang_feats,
-            value=lang_feats,
-            key_padding_mask=(1 - lang_mask).bool() if lang_mask is not None else None
-        )  # [B, 1, out_dim]
-        lang_g_attn = lang_g_attn.squeeze(1).unsqueeze(1)  # [B, 1, out_dim]
-
-        # 结合基础token和注意力聚合（使用可学习权重）
-        fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
-        lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_attn
+            # 不使用注意力机制，直接使用基础token（原始方法）
+            if self.using_clip:
+                eos_index = lang_mask.sum(1).long() - 1
+                lang_g = lang_feats[torch.arange(bs), eos_index].unsqueeze(1)  # [B, 1, C], [EOS] embeddings
+            else:
+                lang_g = lang_feats[:, 0].unsqueeze(1)  # [B, 1, C], [CLS] embeddings
 
         dense_prompts = lang_g  # 不需要detach，也不需要clone（因为后面会concat）
         sparse_prompts = self.sparse_prompts.weight.unsqueeze(0).expand(bs, -1, -1) # [B, P, C]
