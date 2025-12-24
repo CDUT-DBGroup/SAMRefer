@@ -38,6 +38,8 @@ def get_args():
     # 消融实验参数
     parser.add_argument('--use_lang_attention', type=lambda x: (str(x).lower() == 'true'), default=True,
                        help='Use language attention mechanism for text feature aggregation (for ablation study)')
+    parser.add_argument('--use_csaf', type=lambda x: (str(x).lower() == 'true'), default=True,
+                       help='Use Cross-Scale Attention Fusion (CSAF) module (for ablation study)')
     # Step 4: 解析所有参数（命令行优先）
     args = parser.parse_args()
     return args

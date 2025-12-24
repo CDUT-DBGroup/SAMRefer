@@ -44,6 +44,7 @@ def _segm_refersam(pretrained, args, criterion):
         'num_extra_layers': 2,
         "num_prompt_layers": 1,  # 减少层数：从2层减到1层，减少与VLBiAttnLayer的冗余
         'use_lang_attention': getattr(args, 'use_lang_attention', True),  # 消融实验：默认使用文本注意力
+        'use_csaf': getattr(args, 'use_csaf', True),  # 消融实验：默认使用Cross-Scale Attention Fusion (CSAF)模块
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     if pretrained is True:

@@ -16,11 +16,12 @@ class ViTAdapter(nn.Module):
                  deform_num_heads=6, interaction_indexes=None, with_cffn=True, init_values=0.,
                  cffn_ratio=0.25, add_vit_feature=False, drop_path_rate=0., dropout=0.,
                  with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=1, using_clip=True,
-                 use_lang_attention=True):
+                 use_lang_attention=True, use_csaf=True):
         
         super().__init__()
         self.using_clip = using_clip
         self.use_lang_attention = use_lang_attention  # 消融实验开关：是否使用文本注意力
+        self.use_csaf = use_csaf  # 消融实验开关：是否使用Cross-Scale Attention Fusion (CSAF)模块
         self.vis_model = vis_model
         self.drop_path_rate = drop_path_rate
         self.interaction_indexes = interaction_indexes
@@ -48,11 +49,13 @@ class ViTAdapter(nn.Module):
                                           nn.Linear(out_dim, out_dim),
                                           nn.LayerNorm(out_dim, eps=1e-6))
         
-        # 多尺度特征融合模块
-        self.multi_scale_fusion = MultiScaleFusion(dim=out_dim, num_scales=3, num_heads=8, dropout=dropout)
+        # CSAF模块：Cross-Scale Attention Fusion
+        # 1. 多尺度特征融合模块（c2, c3, c4之间的跨尺度注意力）
+        if self.use_csaf:
+            self.multi_scale_fusion = MultiScaleFusion(dim=out_dim, num_scales=3, num_heads=8, dropout=dropout)
         
-        # 增强的c1和c2融合模块
-        if with_deconv:
+        # 2. 增强的c1和c2融合模块（替代简单的上采样相加）
+        if with_deconv and self.use_csaf:
             self.c1c2_fusion = EnhancedC1C2Fusion(dim=out_dim, dropout=dropout)
 
         self.sparse_prompts = nn.Embedding(num_prompts[1], out_dim)
@@ -65,8 +68,10 @@ class ViTAdapter(nn.Module):
         if self.use_lang_attention:
             self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
         
-        # vit_feats与c3融合的可学习权重（用于提升oIoU）
-        self.vit_c3_fusion_weight = nn.Parameter(torch.tensor(0.3))
+        # 3. vit_feats与c3融合的可学习权重（用于提升oIoU）
+        # 如果使用CSAF，使用可学习权重；否则直接相加（权重为1.0）
+        if self.use_csaf:
+            self.vit_c3_fusion_weight = nn.Parameter(torch.tensor(0.3))
         
         # 改进：使用注意力机制聚合文本特征（替代简单的mean聚合）
         # 使用query-key-value注意力，更好地理解文本语义
@@ -194,11 +199,13 @@ class ViTAdapter(nn.Module):
         c3 = self.adapter_proj[1](c3)
         c4 = self.adapter_proj[2](c4)
         
-        # 使用多尺度融合模块增强特征
-        feats_list = [c2, c3, c4]
-        enhanced_feats_list = self.multi_scale_fusion(feats_list)  # List of [B, N_i, D]
-        # 更新c2, c3, c4为增强后的特征
-        c2, c3, c4 = enhanced_feats_list
+        # CSAF模块1：使用多尺度融合模块增强特征（c2, c3, c4之间的跨尺度注意力）
+        if self.use_csaf:
+            feats_list = [c2, c3, c4]
+            enhanced_feats_list = self.multi_scale_fusion(feats_list)  # List of [B, N_i, D]
+            # 更新c2, c3, c4为增强后的特征
+            c2, c3, c4 = enhanced_feats_list
+        
         # 拼接用于后续处理
         adapter_feats = torch.cat([c2, c3, c4], dim=1)
 
@@ -209,8 +216,12 @@ class ViTAdapter(nn.Module):
         
         if self.with_deconv:
             c1 = self.c1_norm(self.c1_conv(c1))
-            # 使用增强的c1c2融合模块替代简单的上采样相加
-            c1 = self.c1c2_fusion(c1, c2)  # [B, C, H1, W1]
+            # CSAF模块2：使用增强的c1c2融合模块替代简单的上采样相加
+            if self.use_csaf:
+                c1 = self.c1c2_fusion(c1, c2)  # [B, C, H1, W1]
+            else:
+                # 原始方法：简单的上采样相加
+                c1 = c1 + F.interpolate(c2.float(), size=c1.shape[-2:], mode='bilinear', align_corners=False).to(c1.dtype)
             c1 = self.out_conv(c1)
             adapter_feats_list = [c1,] + adapter_feats_list
 
@@ -264,12 +275,14 @@ class ViTAdapter(nn.Module):
         vit_feats = vit_feats.permute(0, 3, 1, 2)
         vit_feats = self.vis_model.neck(vit_feats)  # [B, out_chans, h, w]
         
-        # 融合c3特征到vit_feats（参考11.9号版本，有助于提升oIoU）
-        # 使用可学习的融合权重，避免硬编码
-        if not hasattr(self, 'vit_c3_fusion_weight'):
-            self.vit_c3_fusion_weight = nn.Parameter(torch.tensor(0.3))  # 初始权重较小，避免过度影响
+        # CSAF模块3：融合c3特征到vit_feats（有助于提升oIoU）
         # 确保c3的尺寸与vit_feats匹配
         if c3.shape[-2:] == vit_feats.shape[-2:]:
-            vit_feats = vit_feats + self.vit_c3_fusion_weight * c3
+            if self.use_csaf:
+                # 使用可学习的融合权重
+                vit_feats = vit_feats + self.vit_c3_fusion_weight * c3
+            else:
+                # 原始方法：直接相加（权重为1.0）
+                vit_feats = vit_feats + c3
 
         return adapter_feats_list, vit_feats, lang_feats, all_prompts
