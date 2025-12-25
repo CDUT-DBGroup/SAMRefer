@@ -452,6 +452,9 @@ def main():
         total_mask_loss = 0
         total_dice_loss = 0
         
+        # 数据集损失统计（无论是否使用增强损失都需要）
+        dataset_loss_stats = {}
+        
         # 增强损失的统计
         if getattr(args, 'use_enhanced_loss', False):
             total_focal_loss = 0
@@ -459,7 +462,6 @@ def main():
             total_boundary_loss = 0
             total_curriculum_info = {}
             total_dataset_weights = {}
-            dataset_loss_stats = {}
         
         if logger:
             pbar = tqdm(train_loader, disable=not sys.stdout.isatty(), desc=f'Enhanced Multi-Dataset Epoch {epoch+1}/{args.epochs}')
@@ -628,13 +630,14 @@ def main():
                     logger.info(f"  {ds_name}: Total={avg_ds_loss:.4f}, Mask={avg_ds_mask:.4f}, Dice={avg_ds_dice:.4f} (samples: {stats['count']})")
             
             if getattr(args, 'use_enhanced_loss', False):
-                if 'loss_focal' in loss_dict:
+                # 打印增强损失统计（这些变量在条件块内已初始化）
+                if total_focal_loss > 0:
                     avg_focal_loss = total_focal_loss / len(train_loader)
                     logger.info(f"Average Focal Loss: {avg_focal_loss:.4f}")
-                if 'loss_iou' in loss_dict:
+                if total_iou_loss > 0:
                     avg_iou_loss = total_iou_loss / len(train_loader)
                     logger.info(f"Average IoU Loss: {avg_iou_loss:.4f}")
-                if 'loss_boundary' in loss_dict:
+                if total_boundary_loss > 0:
                     avg_boundary_loss = total_boundary_loss / len(train_loader)
                     logger.info(f"Average Boundary Loss: {avg_boundary_loss:.4f}")
                 
