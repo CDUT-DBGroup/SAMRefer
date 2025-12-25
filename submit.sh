@@ -1,7 +1,8 @@
 #! /bin/bash
 
 #JSUB -q ai_share
-#JSUB -n 8
+#JSUB -m gpu01
+#JSUB -n 20
 #JSUB -gpgpu 2
 #JSUB -J refersam_train
 bash scripts/train_test_loss.sh

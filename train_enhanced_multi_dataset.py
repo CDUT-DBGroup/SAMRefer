@@ -3,12 +3,12 @@
 Enhanced training script for multi-dataset training with improved loss functions
 使用增强损失函数的多数据集训练脚本
 """
-import filelock
-filelock.FileLock = filelock.SoftFileLock
-import deepspeed.ops.transformer.inference.triton.matmul_ext as matmul_ext
+# import filelock
+# filelock.FileLock = filelock.SoftFileLock
+# import deepspeed.ops.transformer.inference.triton.matmul_ext as matmul_ext
 
-matmul_ext.FileLock = filelock.SoftFileLock
-print(">>> Patched matmul_ext.FileLock -> SoftFileLock")
+# matmul_ext.FileLock = filelock.SoftFileLock
+# print(">>> Patched matmul_ext.FileLock -> SoftFileLock")
 import os
 import sys
 import torch
@@ -84,74 +84,6 @@ def count_parameters(model):
     return total_params, trainable_params
 
 
-def find_available_port(start_port=29500, max_attempts=100):
-    """
-    查找一个可用的端口
-    
-    Args:
-        start_port: 起始端口号
-        max_attempts: 最大尝试次数
-    
-    Returns:
-        可用的端口号，如果找不到则返回 None
-    """
-    for port in range(start_port, start_port + max_attempts):
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                s.bind(('', port))
-                return port
-        except OSError:
-            continue
-    return None
-
-
-def setup_master_port():
-    """
-    设置MASTER_PORT环境变量，如果未设置或端口不可用，则自动查找可用端口
-    """
-    if 'MASTER_PORT' not in os.environ:
-        # 如果未设置，尝试从默认端口29500开始查找
-        default_port = 29500
-        available_port = find_available_port(start_port=default_port, max_attempts=100)
-        if available_port is None:
-            # 如果默认端口范围都不可用，尝试从 20000 开始
-            available_port = find_available_port(start_port=20000, max_attempts=100)
-        
-        if available_port is not None:
-            os.environ['MASTER_PORT'] = str(available_port)
-            print(f"[INFO] 自动查找可用端口: {available_port}")
-        else:
-            # 如果仍然找不到可用端口，使用默认值（可能会失败，但至少尝试）
-            os.environ['MASTER_PORT'] = str(default_port)
-            print(f"[WARNING] 无法找到可用端口，使用默认端口: {default_port}")
-    else:
-        # 如果用户已经设置了端口，验证它是否可用
-        try:
-            user_port = int(os.environ['MASTER_PORT'])
-            test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            test_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                test_socket.bind(('', user_port))
-                test_socket.close()
-                print(f"[INFO] 使用用户指定的端口: {user_port}")
-            except OSError:
-                # 用户指定的端口不可用，尝试查找替代端口
-                print(f"[WARNING] 用户指定的端口 {user_port} 不可用，正在查找替代端口...")
-                available_port = find_available_port(start_port=20000, max_attempts=100)
-                if available_port is not None:
-                    os.environ['MASTER_PORT'] = str(available_port)
-                    print(f"[INFO] 使用替代端口: {available_port}")
-                else:
-                    print(f"[WARNING] 无法找到替代端口，保持用户指定的端口: {user_port}")
-        except (ValueError, OSError) as e:
-            print(f"[WARNING] 无效或不可用的端口 {os.environ['MASTER_PORT']}: {e}")
-            # 尝试查找替代端口
-            available_port = find_available_port(start_port=20000, max_attempts=100)
-            if available_port is not None:
-                os.environ['MASTER_PORT'] = str(available_port)
-                print(f"[INFO] 使用替代端口: {available_port}")
-
 
 class MultiDatasetWrapper:
     """Wrapper to add dataset name to samples"""
@@ -175,14 +107,18 @@ def main():
     os.environ['NCCL_TIMEOUT'] = '1800'  # 30分钟
     os.environ['GLOO_TIMEOUT_SECONDS'] = '1800'  # 30分钟
     
-    # 自动查找并设置可用端口
-    setup_master_port()
-    
     # 初始化 DeepSpeed
-    deepspeed.init_distributed()
+    #deepspeed.init_distributed()
     
     # 获取原始参数
     args = get_args()
+    rank = int(os.environ.get("RANK", 0))
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = rank
+    torch.cuda.set_device(local_rank)
+    device = torch.device(f"cuda:{local_rank}")
+    logger = setup_logger(args.output_dir, rank)
+    
     
     # 确保 config 是文件路径字符串
     if hasattr(args, 'deepspeed_config') and args.deepspeed_config:
@@ -194,23 +130,7 @@ def main():
         ds_conf = json.load(f)
     use_fp16 = ds_conf.get("fp16", {}).get("enabled", False)
     use_bf16 = ds_conf.get("bf16", {}).get("enabled", False)
-
-    assert os.path.exists(ds_config), f"DeepSpeed config 文件不存在: {ds_config}"
-    local_rank = int(os.environ["LOCAL_RANK"])
-    world_size = dist.get_world_size()
-    rank = dist.get_rank()
-    torch.cuda.set_device(local_rank)
-    device = torch.device(f"cuda:{local_rank}")
-    os.makedirs(args.output_dir, exist_ok=True)
-    logger = setup_logger(args.output_dir, rank)
-    
-    if logger:
-        logger.info(f"Starting Enhanced Multi-Dataset DeepSpeed training: rank {rank}, world_size {world_size}")
-        logger.info(f"Enhanced loss enabled: {getattr(args, 'use_enhanced_loss', True)}")
-        logger.info(f"Loss config path: {getattr(args, 'loss_config_path', 'None')}")
-        logger.info(f"Loss ablation mode: {getattr(args, 'loss_ablation', 'all')}")
-
-    # 创建模型
+        # 创建模型
     if logger:
         logger.info("Creating Enhanced ReferSAM model...")
     
@@ -244,31 +164,53 @@ def main():
         for param in model.parameters():
             if param.dtype != torch.float32:
                 param.data = param.data.float()
+    
+    # 初始化 DeepSpeed 引擎
+    if logger:
+        logger.info("Initializing DeepSpeed engine...")
+    
+    # 创建参数组
+    if hasattr(model, 'params_to_optimize'):
+        param_groups = model.params_to_optimize()
+    else:
+        param_groups = model.parameters()
+
+    if logger:
+        total_params, trainable_params = count_parameters(model)
+        logger.info(f"\nModel Parameters:")
+        logger.info(f"Total parameters: {total_params:,}")
+        logger.info(f"Trainable parameters: {trainable_params:,}")
+        logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
+    
+    if logger:
+        logger.info(f"Starting Enhanced Multi-Dataset DeepSpeed training: rank {rank}, world_size {world_size}")
+        logger.info(f"Enhanced loss enabled: {getattr(args, 'use_enhanced_loss', True)}")
+        logger.info(f"Loss config path: {getattr(args, 'loss_config_path', 'None')}")
+        logger.info(f"Loss ablation mode: {getattr(args, 'loss_ablation', 'all')}")
+
+    # 初始化 DeepSpeed 引擎
+    model_engine, optimizer, _, _ = deepspeed.initialize(
+        model=model,
+        model_parameters=param_groups,
+        config=ds_config
+    )
+
+    assert os.path.exists(ds_config), f"DeepSpeed config 文件不存在: {ds_config}"
+    rank = model_engine.global_rank
+    world_size = model_engine.world_size
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+                
 
     # 创建4个数据集
     if logger:
         logger.info("Creating multi-dataset...")
     
     # RefCOCO
-    # train_dataset_coco = MultiDatasetWrapper(
-    #     ReferDataset(
-    #         refer_data_root=args.data_root,
-    #         dataset='refcoco',
-    #         splitBy='unc',
-    #         bert_tokenizer=args.tokenizer_type,
-    #         max_tokens=getattr(args, 'max_tokens', 30),
-    #         split='train',
-    #         eval_mode=False,
-    #         size=getattr(args, 'img_size', 320),
-    #         precision=args.precision
-    #     ), 'refcoco'
-    # )
-    
-    # RefCOCO+
-    train_dataset_refcocoplus = MultiDatasetWrapper(
+    train_dataset_coco = MultiDatasetWrapper(
          ReferDataset(
              refer_data_root=args.data_root,
-             dataset='refcoco+',
+             dataset='refcoco',
              splitBy='unc',
              bert_tokenizer=args.tokenizer_type,
              max_tokens=getattr(args, 'max_tokens', 30),
@@ -276,8 +218,23 @@ def main():
              eval_mode=False,
              size=getattr(args, 'img_size', 320),
              precision=args.precision
-         ), 'refcoco+'
-     )
+         ), 'refcoco'
+    )
+    
+    # RefCOCO+
+    train_dataset_refcocoplus = MultiDatasetWrapper(
+          ReferDataset(
+              refer_data_root=args.data_root,
+              dataset='refcoco+',
+              splitBy='unc',
+              bert_tokenizer=args.tokenizer_type,
+              max_tokens=getattr(args, 'max_tokens', 30),
+              split='train',
+              eval_mode=False,
+              size=getattr(args, 'img_size', 320),
+              precision=args.precision
+          ), 'refcoco+'
+    )
     
     # # RefCOCOg
     # train_dataset_refcocog = MultiDatasetWrapper(
@@ -327,7 +284,7 @@ def main():
         # train_dataset_refcocog,
         # train_dataset_zom,
         # train_dataset_gref,
-        # train_dataset_coco,
+        train_dataset_coco,
         train_dataset_refcocoplus
     ])
     
@@ -358,7 +315,7 @@ def main():
 
     if logger:
         logger.info("Creating data loaders...")
-        logger.info(f"Total training samples: {len(train_dataset)}")
+        # logger.info(f"Total training samples: {len(train_dataset)}")
         logger.info(f"  - RefCOCO: {len(train_dataset_coco)}")
         # logger.info(f"  - RefCOCO+: {len(train_dataset_refcocoplus)}")
         # logger.info(f"  - RefCOCOg: {len(train_dataset_refcocog)}")
@@ -380,30 +337,6 @@ def main():
         sampler=val_sampler,
         num_workers=8,
         pin_memory=True
-    )
-
-    # 初始化 DeepSpeed 引擎
-    if logger:
-        logger.info("Initializing DeepSpeed engine...")
-    
-    # 创建参数组
-    if hasattr(model, 'params_to_optimize'):
-        param_groups = model.params_to_optimize()
-    else:
-        param_groups = model.parameters()
-
-    if logger:
-        total_params, trainable_params = count_parameters(model)
-        logger.info(f"\nModel Parameters:")
-        logger.info(f"Total parameters: {total_params:,}")
-        logger.info(f"Trainable parameters: {trainable_params:,}")
-        logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
-
-    # 初始化 DeepSpeed 引擎
-    model_engine, optimizer, _, _ = deepspeed.initialize(
-        model=model,
-        model_parameters=param_groups,
-        config=ds_config
     )
 
         # resume support
@@ -526,6 +459,9 @@ def main():
         total_mask_loss = 0
         total_dice_loss = 0
         
+        # 数据集损失统计（无论是否使用增强损失都需要）
+        dataset_loss_stats = {}
+        
         # 增强损失的统计
         if getattr(args, 'use_enhanced_loss', False):
             total_focal_loss = 0
@@ -533,7 +469,6 @@ def main():
             total_boundary_loss = 0
             total_curriculum_info = {}
             total_dataset_weights = {}
-            dataset_loss_stats = {}
         
         if logger:
             pbar = tqdm(train_loader, disable=not sys.stdout.isatty(), desc=f'Enhanced Multi-Dataset Epoch {epoch+1}/{args.epochs}')
@@ -702,13 +637,14 @@ def main():
                     logger.info(f"  {ds_name}: Total={avg_ds_loss:.4f}, Mask={avg_ds_mask:.4f}, Dice={avg_ds_dice:.4f} (samples: {stats['count']})")
             
             if getattr(args, 'use_enhanced_loss', False):
-                if 'loss_focal' in loss_dict:
+                # 打印增强损失统计（这些变量在条件块内已初始化）
+                if total_focal_loss > 0:
                     avg_focal_loss = total_focal_loss / len(train_loader)
                     logger.info(f"Average Focal Loss: {avg_focal_loss:.4f}")
-                if 'loss_iou' in loss_dict:
+                if total_iou_loss > 0:
                     avg_iou_loss = total_iou_loss / len(train_loader)
                     logger.info(f"Average IoU Loss: {avg_iou_loss:.4f}")
-                if 'loss_boundary' in loss_dict:
+                if total_boundary_loss > 0:
                     avg_boundary_loss = total_boundary_loss / len(train_loader)
                     logger.info(f"Average Boundary Loss: {avg_boundary_loss:.4f}")
                 

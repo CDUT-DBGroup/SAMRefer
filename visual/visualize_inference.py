@@ -8,17 +8,44 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.patches import Rectangle
+from matplotlib import cm
+from scipy import ndimage
 import torchvision.transforms.functional as TF
 from torchvision import transforms
 from PIL import Image
 import argparse
 
+# 配置matplotlib支持中文显示
+try:
+    # 尝试设置中文字体
+    import matplotlib.font_manager as fm
+    # 查找可用的中文字体
+    chinese_fonts = ['SimHei', 'Microsoft YaHei', 'WenQuanYi Micro Hei', 'WenQuanYi Zen Hei', 
+                     'Noto Sans CJK SC', 'STHeiti', 'Arial Unicode MS']
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    font_found = False
+    for font in chinese_fonts:
+        if font in available_fonts:
+            plt.rcParams['font.sans-serif'] = [font] + plt.rcParams['font.sans-serif']
+            font_found = True
+            break
+    if not font_found:
+        # 如果没有找到中文字体，使用默认字体并给出警告
+        print("Warning: No Chinese font found. Chinese characters may display as squares.")
+        plt.rcParams['font.sans-serif'] = ['DejaVu Sans'] + plt.rcParams['font.sans-serif']
+except Exception as e:
+    print(f"Warning: Failed to configure Chinese font: {e}")
+    plt.rcParams['font.sans-serif'] = ['DejaVu Sans'] + plt.rcParams['font.sans-serif']
+
+plt.rcParams['axes.unicode_minus'] = False  # 用来正常显示负号
+
 from dataset.ReferDataset import ReferDataset
 from dataset.GRefDataset import GRefDataset
 from dataset.Dataset_referit import ReferitDataset
-from get_args import get_args
 from model.enhanced_builder import refersam, load_model_with_checkpoint
 from validation.evaluation import get_bbox_from_mask
+import yaml
+from types import SimpleNamespace
 
 
 def denormalize_image(image_tensor):
@@ -64,15 +91,19 @@ def visualize_inference_with_bbox(image_tensor, pred_mask, sentence, save_path,
             # 如果是 [C, H, W] 格式，转换为 [H, W, C]
             image = image.transpose(1, 2, 0)
     
-    # 处理预测mask
+    # 处理预测mask（保存原始值用于热力图）
     if isinstance(pred_mask, torch.Tensor):
-        pred_mask = pred_mask.cpu().numpy()
-    if pred_mask.ndim == 3:
-        pred_mask = pred_mask.squeeze(0)
-    if pred_mask.ndim == 2:
-        pred_mask_bool = pred_mask > 0.5  # 二值化
+        pred_mask_raw = pred_mask.cpu().numpy()
     else:
-        pred_mask_bool = pred_mask.astype(bool)
+        pred_mask_raw = np.array(pred_mask)
+    if pred_mask_raw.ndim == 3:
+        pred_mask_raw = pred_mask_raw.squeeze(0)
+    # 保存原始mask值用于热力图
+    pred_mask_original = pred_mask_raw.copy()
+    if pred_mask_raw.ndim == 2:
+        pred_mask_bool = pred_mask_raw > 0.5  # 二值化
+    else:
+        pred_mask_bool = pred_mask_raw.astype(bool)
     
     # 从mask中提取bounding box（仅在需要显示box时计算）
     pred_bbox = None
@@ -90,20 +121,51 @@ def visualize_inference_with_bbox(image_tensor, pred_mask, sentence, save_path,
     
     # 第一个子图：原图
     axes[0].imshow(image)
-    axes[0].set_title('原始图像', fontsize=14, fontweight='bold')
+    axes[0].set_title('original image', fontsize=14, fontweight='bold')
     axes[0].axis('off')
     
-    # 第二个子图：原图 + 预测mask叠加
+    # 第二个子图：原图 + 预测mask叠加（热力图效果）
     axes[1].imshow(image)
     
-    # 绘制预测的mask（半透明叠加）
+    # 绘制预测的mask（热力图效果）
     if pred_mask_bool.sum() > 0:
-        # 创建彩色mask
-        color_mask = np.zeros_like(image)
-        color_mask[:, :, 0] = 1.0  # 红色通道
-        color_mask[:, :, 1] = 0.0
-        color_mask[:, :, 2] = 0.0
-        axes[1].imshow(color_mask, alpha=0.3 * pred_mask_bool.astype(float))
+        # 创建热力图mask：使用原始pred_mask值来创建渐变效果
+        heatmap_data = pred_mask_original.copy()
+        # 归一化到0-1范围
+        if heatmap_data.max() > heatmap_data.min():
+            heatmap_data = (heatmap_data - heatmap_data.min()) / (heatmap_data.max() - heatmap_data.min())
+        else:
+            # 如果所有值相同，使用二值mask
+            heatmap_data = pred_mask_bool.astype(float)
+        
+        # 只在mask区域内应用热力图，并对边界进行平滑处理
+        heatmap_data = heatmap_data * pred_mask_bool.astype(float)
+        # 对mask进行轻微的高斯模糊以创建平滑的热力图效果
+        heatmap_data = ndimage.gaussian_filter(heatmap_data, sigma=1.5)
+        # 重新应用mask区域
+        heatmap_data = heatmap_data * pred_mask_bool.astype(float)
+        
+        # 使用'hot' colormap创建热力图（从黑到红到黄，效果更明显）
+        # 也可以使用'jet'（蓝到红）或'coolwarm'等其他colormap
+        colormap = cm.get_cmap('hot')  # 'hot': 黑->红->黄
+        heatmap_colored = colormap(heatmap_data)
+        
+        # 只显示mask区域，背景保持透明，使用更高的不透明度使效果更明显
+        heatmap_colored[:, :, 3] = heatmap_data * 0.75  # alpha通道，0.75的不透明度
+        
+        axes[1].imshow(heatmap_colored)
+        
+        # 添加轮廓线来突出mask边界，使效果更明显
+        # 使用scipy的方法计算边界（更可靠，不需要额外依赖）
+        boundary = pred_mask_bool.astype(float) - ndimage.binary_erosion(pred_mask_bool, iterations=1).astype(float)
+        if boundary.sum() > 0:
+            # 绘制青色轮廓线
+            boundary_colored = np.zeros((*boundary.shape, 4))
+            boundary_colored[:, :, 0] = 0.0  # R
+            boundary_colored[:, :, 1] = 1.0  # G
+            boundary_colored[:, :, 2] = 1.0  # B (青色)
+            boundary_colored[:, :, 3] = boundary * 0.95  # alpha通道
+            axes[1].imshow(boundary_colored)
         
         # 可选：绘制预测的bounding box
         if show_bbox and pred_bbox is not None:
@@ -113,13 +175,13 @@ def visualize_inference_with_bbox(image_tensor, pred_mask, sentence, save_path,
                     pred_bbox[2] - pred_bbox[0],
                     pred_bbox[3] - pred_bbox[1],
                     linewidth=3,
-                    edgecolor='red',
+                    edgecolor='cyan',
                     facecolor='none',
                     label='预测框'
                 )
                 axes[1].add_patch(rect)
     
-    axes[1].set_title(f'推理结果叠加\n"{sentence}"', fontsize=14, fontweight='bold')
+    axes[1].set_title(f'inference result overlay\n"{sentence}"', fontsize=14, fontweight='bold')
     axes[1].axis('off')
     if pred_mask_bool.sum() > 0 and show_bbox and pred_bbox is not None:
         axes[1].legend(loc='upper right', fontsize=10)
@@ -177,7 +239,7 @@ def visualize_inference_with_bbox(image_tensor, pred_mask, sentence, save_path,
                         )
                         axes[2].add_patch(rect_gt)
         
-        axes[2].set_title('Ground Truth叠加', fontsize=14, fontweight='bold')
+        axes[2].set_title('Ground Truth overlay', fontsize=14, fontweight='bold')
         axes[2].axis('off')
         if gt_mask_bool.sum() > 0 and show_bbox:
             axes[2].legend(loc='upper right', fontsize=10)
@@ -252,7 +314,7 @@ def visualize_dataset_samples(model, dataset, num_samples=5, output_dir='visual/
 
 
 def visualize_single_image(model, image_path, sentence, output_path, device='cuda', 
-                           img_size=320, show_bbox=False):
+                           img_size=320, show_bbox=False, ck_bert=None):
     """
     对单张图片进行推理和可视化
     
@@ -263,8 +325,12 @@ def visualize_single_image(model, image_path, sentence, output_path, device='cud
         output_path: 输出路径
         device: 设备
         img_size: 图像大小
+        ck_bert: BERT模型路径
     """
     from transformers import BertTokenizer
+    
+    if ck_bert is None:
+        raise ValueError("ck_bert 参数不能为 None")
     
     model.eval()
     model = model.to(device)
@@ -279,8 +345,7 @@ def visualize_single_image(model, image_path, sentence, output_path, device='cud
     img_tensor = transform(img).unsqueeze(0).to(device)
     
     # 处理文本
-    args = get_args()
-    tokenizer = BertTokenizer.from_pretrained(args.ck_bert)
+    tokenizer = BertTokenizer.from_pretrained(ck_bert)
     tokens = tokenizer.encode(sentence, add_special_tokens=True, max_length=30, 
                               truncation=True, padding='max_length')
     word_ids = torch.tensor([tokens]).to(device)
@@ -305,7 +370,12 @@ def visualize_single_image(model, image_path, sentence, output_path, device='cud
 
 
 def main():
+    # Step 1: 先解析 config 文件路径（类似 get_args.py 的方式）
     parser = argparse.ArgumentParser(description='模型推理可视化')
+    parser.add_argument('--config', type=str, default='configs/main_refersam_bert.yaml',
+                       help='配置文件路径')
+    
+    # 可视化相关参数（这些是可视化脚本特有的，不在配置文件中）
     parser.add_argument('--mode', type=str, choices=['dataset', 'single'], 
                        default='dataset', help='可视化模式: dataset或single')
     parser.add_argument('--num_samples', type=int, default=5, 
@@ -314,7 +384,7 @@ def main():
                        help='单张图片路径（仅single模式）')
     parser.add_argument('--sentence', type=str, default=None,
                        help='文本描述（仅single模式）')
-    parser.add_argument('--output_dir', type=str, default='visual/results',
+    parser.add_argument('--output_img_path', type=str, default='visual/results',
                        help='输出目录')
     parser.add_argument('--show_gt', action='store_true', default=True,
                        help='是否显示ground truth（仅dataset模式，默认True）')
@@ -329,11 +399,40 @@ def main():
                        help='数据集split（仅dataset模式）')
     parser.add_argument('--sample_idx', type=int, default=None,
                        help='指定数据集的样本索引（可选）')
+    parser.add_argument('--use_model_origin', action='store_true', default=False,
+                       help='使用model_origin模型（默认False，使用model模型）')
     
-    args_cmd = parser.parse_args()
+    # 先解析 config 参数
+    args_config_only, remaining = parser.parse_known_args()
     
-    # 获取配置参数
-    args = get_args()
+    # Step 2: 加载 YAML 配置文件，自动添加所有配置参数
+    if os.path.exists(args_config_only.config):
+        with open(args_config_only.config, 'r') as f:
+            config_dict = yaml.safe_load(f)
+        
+        # 自动将配置文件中的所有键值对添加为参数
+        for key, value in config_dict.items():
+            arg_type = type(value) if value is not None else str
+            parser.add_argument(f'--{key}', type=arg_type, default=value)
+    
+    # Step 3: 添加一些额外的参数（不在配置文件中，但可能需要）
+    parser.add_argument('--deepspeed_config', type=str, default=None,
+                       help='DeepSpeed配置文件路径')
+    parser.add_argument('--local_rank', type=int, default=-1,
+                       help='Local rank for distributed training')
+    parser.add_argument('--use_enhanced_loss', action='store_true',
+                       help='使用增强损失函数')
+    parser.add_argument('--loss_config_path', type=str, default=None,
+                       help='损失配置文件路径')
+    parser.add_argument('--sentence_aggregation', type=str, 
+                       choices=['best', 'mean', 'mean_iou', 'median'],
+                       default='mean', help='Sentence aggregation method (not used in visualization)')
+    
+    # Step 4: 解析所有参数（命令行优先）
+    args = parser.parse_args()
+    
+    # 直接使用 args，不需要创建 model_args
+    model_args = args
     
     # 设置设备
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -341,63 +440,82 @@ def main():
     
     # 加载模型
     print("正在加载模型...")
-    loss_config_path = getattr(args, 'loss_config_path', None) if hasattr(args, 'use_enhanced_loss') and args.use_enhanced_loss else None
-    model, use_fp16, use_bf16, model_engine = load_model_with_checkpoint(
-        model_func=refersam,
-        pretrained=True,
-        args=args,
-        loss_config_path=loss_config_path,
-        device=device
-    )
+    if args.use_model_origin:
+        # 使用 model_origin
+        print("使用 model_origin 模型")
+        from model_origin.builder import refersam as refersam_origin
+        
+        # model_origin 的 refersam 函数会自动加载 checkpoint（如果 pretrained 不为 None）
+        pretrained = hasattr(model_args, 'pre_train_path') and model_args.pre_train_path is not None
+        model = refersam_origin(pretrained=pretrained, args=model_args)
+        
+        # 确保模型在正确的设备上
+        if next(model.parameters()).device != device:
+            model = model.to(device)
+        model.eval()
+        use_fp16 = False
+        use_bf16 = False
+        model_engine = None
+    else:
+        # 使用 model (enhanced)
+        print("使用 model (enhanced) 模型")
+        loss_config_path = getattr(model_args, 'loss_config_path', None) if getattr(model_args, 'use_enhanced_loss', False) else None
+        model, use_fp16, use_bf16, model_engine = load_model_with_checkpoint(
+            model_func=refersam,
+            pretrained=True,
+            args=model_args,
+            loss_config_path=loss_config_path,
+            device=device
+        )
     print("模型加载完成")
     
-    if args_cmd.mode == 'dataset':
+    if args.mode == 'dataset':
         # 数据集模式
-        print(f"正在加载数据集: {args_cmd.dataset_name}")
+        print(f"正在加载数据集: {args.dataset_name}")
         
-        if args_cmd.dataset_name == 'refcoco':
+        if args.dataset_name == 'refcoco':
             dataset = ReferDataset(
-                refer_data_root=args.data_root,
+                refer_data_root=getattr(model_args, 'data_root', None),
                 dataset='refcoco',
                 splitBy='unc',
-                bert_tokenizer=args.tokenizer_type,
+                bert_tokenizer=getattr(model_args, 'tokenizer_type', 'bert'),
                 max_tokens=30,
-                split=args_cmd.split,
+                split=args.split,
                 eval_mode=False,
-                size=getattr(args, 'img_size', 320),
-                precision=args.precision
+                size=getattr(model_args, 'img_size', 320),
+                precision=getattr(model_args, 'precision', 'fp32')
             )
-        elif args_cmd.dataset_name == 'grefcoco':
+        elif args.dataset_name == 'grefcoco':
             dataset = GRefDataset(
-                refer_data_root=args.data_root,
+                refer_data_root=getattr(model_args, 'data_root', None),
                 dataset='grefcoco',
                 splitBy='unc',
-                bert_tokenizer=args.tokenizer_type,
+                bert_tokenizer=getattr(model_args, 'tokenizer_type', 'bert'),
                 max_tokens=30,
-                split=args_cmd.split,
+                split=args.split,
                 eval_mode=False,
-                size=getattr(args, 'img_size', 320),
-                precision=args.precision
+                size=getattr(model_args, 'img_size', 320),
+                precision=getattr(model_args, 'precision', 'fp32')
             )
-        elif args_cmd.dataset_name == 'referit':
+        elif args.dataset_name == 'referit':
             dataset = ReferitDataset(
-                root=args.data_referit_root,
-                split=args_cmd.split,
+                root=getattr(model_args, 'data_referit_root', None),
+                split=args.split,
                 max_tokens=30,
-                size=getattr(args, 'img_size', 320)
+                size=getattr(model_args, 'img_size', 320)
             )
         else:
-            raise ValueError(f"不支持的数据集: {args_cmd.dataset_name}")
+            raise ValueError(f"不支持的数据集: {args.dataset_name}")
         
         print(f"数据集大小: {len(dataset)}")
         
         # 如果指定了样本索引，只可视化该样本
-        if args_cmd.sample_idx is not None:
-            indices = [args_cmd.sample_idx]
+        if args.sample_idx is not None:
+            indices = [args.sample_idx]
         else:
-            indices = np.random.choice(len(dataset), min(args_cmd.num_samples, len(dataset)), replace=False)
+            indices = np.random.choice(len(dataset), min(args.num_samples, len(dataset)), replace=False)
         
-        os.makedirs(args_cmd.output_dir, exist_ok=True)
+        os.makedirs(args.output_img_path, exist_ok=True)
         
         model.eval()
         model = model.to(device)
@@ -422,7 +540,7 @@ def main():
                 # 获取ground truth
                 gt_mask = None
                 gt_bbox = None
-                if args_cmd.show_gt:
+                if args.show_gt:
                     gt_mask = targets['mask']
                     if 'boxes' in targets and targets['boxes'] is not None:
                         gt_bbox = targets['boxes']
@@ -430,7 +548,7 @@ def main():
                 # 保存路径
                 img_path = targets.get('img_path', f'sample_{sample_idx}')
                 save_name = f"vis_{idx:03d}_{os.path.basename(str(img_path))}.png"
-                save_path = os.path.join(args_cmd.output_dir, save_name)
+                save_path = os.path.join(args.output_img_path, save_name)
                 
                 # 可视化
                 visualize_inference_with_bbox(
@@ -440,32 +558,34 @@ def main():
                     save_path,
                     gt_mask=gt_mask,
                     gt_bbox=gt_bbox,
-                    show_gt=args_cmd.show_gt,
-                    show_bbox=args_cmd.show_bbox
+                    show_gt=args.show_gt,
+                    show_bbox=args.show_bbox
                 )
         
-        print(f"\n✅ 所有可视化结果已保存到: {args_cmd.output_dir}")
+        print(f"\n✅ 所有可视化结果已保存到: {args.output_img_path}")
     
-    elif args_cmd.mode == 'single':
+    elif args.mode == 'single':
         # 单张图片模式
-        if args_cmd.image_path is None or args_cmd.sentence is None:
+        if args.image_path is None or args.sentence is None:
             raise ValueError("single模式需要提供--image_path和--sentence参数")
         
-        if args_cmd.output_dir.endswith('.png'):
-            output_path = args_cmd.output_dir
+        if args.output_img_path.endswith('.png'):
+            output_path = args.output_img_path
         else:
-            os.makedirs(args_cmd.output_dir, exist_ok=True)
-            output_path = os.path.join(args_cmd.output_dir, 
-                                      f"vis_{os.path.basename(args_cmd.image_path)}")
+            os.makedirs(args.output_img_path, exist_ok=True)
+            output_path = os.path.join(args.output_img_path, 
+                                      f"vis_{os.path.basename(args.image_path)}")
         
-        print(f"正在处理单张图片: {args_cmd.image_path}")
+        print(f"正在处理单张图片: {args.image_path}")
         visualize_single_image(
             model,
-            args_cmd.image_path,
-            args_cmd.sentence,
+            args.image_path,
+            args.sentence,
             output_path,
             device=device,
-            show_bbox=args_cmd.show_bbox
+            img_size=getattr(model_args, 'img_size', 320),
+            show_bbox=args.show_bbox,
+            ck_bert=getattr(model_args, 'ck_bert', None)
         )
         print(f"✅ 可视化结果已保存到: {output_path}")
 
