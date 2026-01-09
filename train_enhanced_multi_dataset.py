@@ -22,7 +22,7 @@ from dataset.ReferDataset import ReferDataset
 from dataset.RefzomDataset import ReferzomDataset
 from get_args import get_args
 from model.enhanced_builder import refersam_enhanced, refersam_original
-from validate_bert import evaluate_four_datasets
+from validate_origin import evaluate_four_datasets
 from validation.evaluation import validate
 import logging
 import datetime
