@@ -103,8 +103,9 @@ health_check() {
 deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/main_refersam_bert.yaml \
-    --use_enhanced_loss \
-    --loss_config_path configs/enhanced_loss_config.yaml \
+    --use_lang_attention False \
+    --use_csaf False \
+    --loss_config_path configs/none.yaml \
      > "$LOG_FILE" 2>&1 &
 
 TRAIN_PID=$!
@@ -143,7 +144,7 @@ while kill -0 $TRAIN_PID 2>/dev/null; do
     
     # 检查是否超过最大训练时间
     if [ $elapsed_time -ge $MAX_TRAINING_TIME ]; then
-        deepspeed --num_gpus $NUM_GPUS validate_bert.py \
+        deepspeed --num_gpus $NUM_GPUS validate.py \
             --deepspeed_config configs/ds_config.json \
             --config configs/main_refersam_bert.yaml \
             --use_enhanced_loss \
@@ -182,7 +183,7 @@ rm -f "$PID_FILE"
 # 根据退出状态码判断训练结果
 if [ $TRAIN_EXIT_CODE -eq 0 ]; then
     echo "Training completed successfully."
-    deepspeed --num_gpus $NUM_GPUS validate_bert.py \
+    deepspeed --num_gpus $NUM_GPUS validate.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/main_refersam_bert.yaml \
     --use_enhanced_loss \

@@ -5,7 +5,6 @@
 #!/bin/bash
 # 优化后的训练脚本
 # 使用改进的模型架构、训练策略和数据增强
-
 echo "Starting optimized ReferSAM training..."
 
 # 首先检查 CUDA 是否可用
@@ -34,13 +33,16 @@ export FILELOCK_DEFAULT_CLASS=SoftFileLock
 
  #启动训练
 export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
-
+export MASTER_PORT=29600
 # nohup deepspeed --num_gpus $NUM_GPUS train_enhanced_loss.py \
-deepspeed --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
+deepspeed --master_port $MASTER_PORT --num_gpus $NUM_GPUS train_enhanced_multi_dataset.py \
     --deepspeed_config configs/ds_config.json \
     --config configs/student.yaml \
     --use_enhanced_loss \
+    --use_lang_attention False \
+    --use_csaf False \
     --loss_config_path configs/enhanced_loss_config.yaml \
+    --output_dir output/refersam_bert/no_two \
      > train_loss_$(date +%m%d_%H%M).log 2>&1
 
 echo "Training started in background. Check the log file for progress."
