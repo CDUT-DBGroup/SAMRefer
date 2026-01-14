@@ -103,109 +103,72 @@ class MultiDatasetWrapper:
 
 
 def main():
-    # 设置分布式超时，防止卡死（30分钟超时）
-    os.environ['NCCL_TIMEOUT'] = '1800'  # 30分钟
-    os.environ['GLOO_TIMEOUT_SECONDS'] = '1800'  # 30分钟
+    # ================================
+    # DeepSpeed 标准初始化（可直接用）
+    # ================================
     
-    # 初始化 DeepSpeed
-    #deepspeed.init_distributed()
-    
-    # 获取原始参数
+    os.environ['NCCL_TIMEOUT'] = '1800'
+    os.environ['GLOO_TIMEOUT_SECONDS'] = '1800'
     args = get_args()
-    rank = int(os.environ.get("RANK", 0))
-    local_rank = int(os.environ["LOCAL_RANK"])
-    world_size = rank
-    torch.cuda.set_device(local_rank)
-    device = torch.device(f"cuda:{local_rank}")
-    logger = setup_logger(args.output_dir, rank)
-    
-    
-    # 确保 config 是文件路径字符串
+    # DeepSpeed config
     if hasattr(args, 'deepspeed_config') and args.deepspeed_config:
         ds_config = args.deepspeed_config
     else:
         ds_config = 'ds_config.json'
-
+    
+    assert os.path.exists(ds_config), f"DeepSpeed config 文件不存在: {ds_config}"
+    
     with open(ds_config) as f:
         ds_conf = json.load(f)
+    
     use_fp16 = ds_conf.get("fp16", {}).get("enabled", False)
     use_bf16 = ds_conf.get("bf16", {}).get("enabled", False)
-        # 创建模型
-    if logger:
-        logger.info("Creating Enhanced ReferSAM model...")
     
+    # 构建模型（不要 .to(device)，不要 half）
     if getattr(args, 'use_enhanced_loss', False):
         model = refersam_enhanced(
-            pretrained=None, 
-            args=args, 
+            pretrained=None,
+            args=args,
             loss_config_path=getattr(args, 'loss_config_path', None)
         )
-        if logger:
-            logger.info("Using Enhanced Loss Functions: Focal + IoU + Boundary + Adaptive Weighting + Curriculum Learning")
     else:
         model = refersam_original(pretrained=None, args=args)
-        if logger:
-            logger.info("Using Original Loss Functions: CE + Dice")
     
-    model = model.to(device)
-    
-    # 根据DeepSpeed配置设置模型数据类型
-    if use_fp16:
-        if logger:
-            logger.info("Converting model to fp16 for DeepSpeed")
-        model = model.half()
-    elif use_bf16:
-        if logger:
-            logger.info("Converting model to bf16 for DeepSpeed")
-        model = model.to(torch.bfloat16)
-    else:
-        if logger:
-            logger.info("Using fp32 precision")
-        for param in model.parameters():
-            if param.dtype != torch.float32:
-                param.data = param.data.float()
-    
-    # 初始化 DeepSpeed 引擎
-    if logger:
-        logger.info("Initializing DeepSpeed engine...")
-    
-    # 创建参数组
+    # 参数组
     if hasattr(model, 'params_to_optimize'):
         param_groups = model.params_to_optimize()
     else:
         param_groups = model.parameters()
-
-    if logger:
-        total_params, trainable_params = count_parameters(model)
-        logger.info(f"\nModel Parameters:")
-        logger.info(f"Total parameters: {total_params:,}")
-        logger.info(f"Trainable parameters: {trainable_params:,}")
-        logger.info(f"Non-trainable parameters: {total_params - trainable_params:,}")
     
-    if logger:
-        logger.info(f"Starting Enhanced Multi-Dataset DeepSpeed training: rank {rank}, world_size {world_size}")
-        logger.info(f"Enhanced loss enabled: {getattr(args, 'use_enhanced_loss', True)}")
-        logger.info(f"Loss config path: {getattr(args, 'loss_config_path', 'None')}")
-        logger.info(f"Loss ablation mode: {getattr(args, 'loss_ablation', 'all')}")
-
-    # 初始化 DeepSpeed 引擎
+    # DeepSpeed 初始化（唯一分布式入口）
     model_engine, optimizer, _, _ = deepspeed.initialize(
         model=model,
         model_parameters=param_groups,
         config=ds_config
     )
-
-    assert os.path.exists(ds_config), f"DeepSpeed config 文件不存在: {ds_config}"
-    rank = model_engine.global_rank
-    world_size = model_engine.world_size
-    os.makedirs(args.output_dir, exist_ok=True)
     
-                
-
+    # 分布式信息（从 model_engine 读取）
+    rank = model_engine.global_rank
+    local_rank = model_engine.local_rank
+    world_size = model_engine.world_size
+    device = model_engine.device
+    
+    # Logger
+    logger = setup_logger(args.output_dir, rank)
+    if logger:
+        logger.info(f"DeepSpeed initialized successfully")
+        logger.info(f"Rank: {rank}, Local rank: {local_rank}, World size: {world_size}")
+        logger.info(f"Device: {device}")
+        logger.info(f"CUDA_VISIBLE_DEVICES: {os.environ.get('CUDA_VISIBLE_DEVICES')}")
+    
+    # 参数统计（可选）
+    if logger:
+        total_params, trainable_params = count_parameters(model_engine.module)
+        logger.info(f"Total params: {total_params:,}")
+        logger.info(f"Trainable params: {trainable_params:,}")
     # 创建4个数据集
     if logger:
         logger.info("Creating multi-dataset...")
-    
     # RefCOCO
     train_dataset_coco = MultiDatasetWrapper(
          ReferDataset(
@@ -222,19 +185,19 @@ def main():
     )
     
     # RefCOCO+
-    train_dataset_refcocoplus = MultiDatasetWrapper(
-          ReferDataset(
-              refer_data_root=args.data_root,
-              dataset='refcoco+',
-              splitBy='unc',
-              bert_tokenizer=args.tokenizer_type,
-              max_tokens=getattr(args, 'max_tokens', 30),
-              split='train',
-              eval_mode=False,
-              size=getattr(args, 'img_size', 320),
-              precision=args.precision
-          ), 'refcoco+'
-    )
+    # train_dataset_refcocoplus = MultiDatasetWrapper(
+    #       ReferDataset(
+    #           refer_data_root=args.data_root,
+    #           dataset='refcoco+',
+    #           splitBy='unc',
+    #           bert_tokenizer=args.tokenizer_type,
+    #           max_tokens=getattr(args, 'max_tokens', 30),
+    #           split='train',
+    #           eval_mode=False,
+    #           size=getattr(args, 'img_size', 320),
+    #           precision=args.precision
+    #       ), 'refcoco+'
+    # )
     
     # # RefCOCOg
     # train_dataset_refcocog = MultiDatasetWrapper(
@@ -285,24 +248,13 @@ def main():
         # train_dataset_zom,
         # train_dataset_gref,
         train_dataset_coco,
-        train_dataset_refcocoplus
+        # train_dataset_refcocoplus
     ])
     
     # 验证数据集（使用RefCOCO）
-    # val_dataset_coco = ReferDataset(
-    #     refer_data_root=args.data_root,
-    #     dataset='refcoco',
-    #     splitBy='unc',
-    #     bert_tokenizer=args.tokenizer_type,
-    #     max_tokens=getattr(args, 'max_tokens', 30),
-    #     split='val',
-    #     eval_mode=False,
-    #     size=getattr(args, 'img_size', 320),
-    #     precision=args.precision
-    # )
-    val_dataset_refcocoplus = ReferDataset(
+    val_dataset_coco = ReferDataset(
         refer_data_root=args.data_root,
-        dataset='refcoco+',
+        dataset='refcoco',
         splitBy='unc',
         bert_tokenizer=args.tokenizer_type,
         max_tokens=getattr(args, 'max_tokens', 30),
@@ -311,7 +263,18 @@ def main():
         size=getattr(args, 'img_size', 320),
         precision=args.precision
     )
-    val_dataset = torch.utils.data.ConcatDataset([val_dataset_refcocoplus])
+    # val_dataset_refcocoplus = ReferDataset(
+    #     refer_data_root=args.data_root,
+    #     dataset='refcoco+',
+    #     splitBy='unc',
+    #     bert_tokenizer=args.tokenizer_type,
+    #     max_tokens=getattr(args, 'max_tokens', 30),
+    #     split='val',
+    #     eval_mode=False,
+    #     size=getattr(args, 'img_size', 320),
+    #     precision=args.precision
+    # )
+    val_dataset = torch.utils.data.ConcatDataset([val_dataset_coco])
 
     if logger:
         logger.info("Creating data loaders...")
@@ -687,26 +650,43 @@ def main():
             if iou_miou_sum > best_iou_miou_sum:
                 best_iou_miou_sum = iou_miou_sum
                 save_best = True
+            logger.info(f"Validation completed, preparing to broadcast results...")
+        else:
+            # 非rank 0进程等待验证完成
+            if logger:
+                logger.info(f"Rank {rank} waiting for validation results from rank 0...")
+
+        # 确保所有进程都到达这里再继续（关键同步点）
+        dist.barrier()
+        if logger:
+            logger.info(f"Rank {rank} passed barrier, starting broadcast operations")
 
         # 广播保存决策和 metrics 到所有进程
-        save_best_tensor = torch.tensor([int(save_best)], device=device)
+        # 确保所有进程都创建相同类型的tensor
+        save_best_tensor = torch.tensor([int(save_best)], dtype=torch.int, device=device)
         dist.broadcast(save_best_tensor, src=0)
         save_best = bool(save_best_tensor.item())
 
         # 广播 metrics 到所有进程
-        if rank != 0:
-            metrics = {
-                'mIoU': torch.zeros(1, device=device),
-                'oIoU': torch.zeros(1, device=device),
-                'gIoU': torch.zeros(1, device=device),
-                'Acc': torch.zeros(1, device=device),
-                'pointM': torch.zeros(1, device=device),
-                'best_IoU': torch.zeros(1, device=device)
-            }
-        for key in metrics:
-            tensor = metrics[key] if isinstance(metrics[key], torch.Tensor) else torch.tensor([metrics[key]], device=device)
-            dist.broadcast(tensor, src=0)
-            metrics[key] = tensor.item()
+        # 先定义所有需要广播的key
+        metric_keys = ['mIoU', 'oIoU', 'gIoU', 'Acc', 'pointM', 'best_IoU']
+        
+        # 为所有进程创建相同类型的tensor
+        metrics_tensors = {}
+        for key in metric_keys:
+            if rank == 0:
+                # rank 0: 从验证结果创建tensor
+                metrics_tensors[key] = torch.tensor([metrics[key]], dtype=torch.float32, device=device)
+            else:
+                # 其他rank: 创建零tensor用于接收
+                metrics_tensors[key] = torch.zeros(1, dtype=torch.float32, device=device)
+        
+        # 广播所有metrics
+        for key in metric_keys:
+            dist.broadcast(metrics_tensors[key], src=0)
+        
+        # 转换为字典格式（所有进程）
+        metrics = {key: metrics_tensors[key].item() for key in metric_keys}
 
         # 所有进程准备 client_state
         client_state = {
@@ -723,7 +703,11 @@ def main():
                 if os.path.exists(best_path):
                     shutil.rmtree(best_path)
                 os.makedirs(best_path, exist_ok=True)
+                logger.info(f"Preparing to save best model to {best_path}...")
+            # 确保目录创建完成后再继续
             dist.barrier()
+            if logger:
+                logger.info(f"Rank {rank} saving best checkpoint...")
             model_engine.save_checkpoint(best_path, client_state=client_state)
             if rank == 0:
                 logger.info(f"Saved new enhanced multi-dataset best iou+miou model with score: {best_iou_miou_sum:.4f}")
@@ -732,16 +716,29 @@ def main():
         current_checkpoint = os.path.join(args.output_dir, f'enhanced_multi_dataset_checkpoint_epoch_{epoch+1}')
         if rank == 0:
             os.makedirs(args.output_dir, exist_ok=True)
+            logger.info(f"Preparing to save checkpoint for epoch {epoch+1}...")
+        # 确保目录创建完成后再继续
         dist.barrier()
+        if logger:
+            logger.info(f"Rank {rank} saving epoch checkpoint...")
         model_engine.save_checkpoint(current_checkpoint, client_state=client_state)
         if rank == 0:
             logger.info(f"Saved enhanced multi-dataset checkpoint for epoch {epoch+1}")
 
-        # 删除上一个 checkpoint
-        prev_checkpoint = os.path.join(args.output_dir, f'enhanced_multi_dataset_checkpoint_epoch_{epoch}')
-        if rank == 0 and os.path.exists(prev_checkpoint):
-            shutil.rmtree(prev_checkpoint)
+        # 删除上一个 checkpoint（只在rank 0执行，不需要barrier）
+        if rank == 0:
+            prev_checkpoint = os.path.join(args.output_dir, f'enhanced_multi_dataset_checkpoint_epoch_{epoch}')
+            if os.path.exists(prev_checkpoint):
+                try:
+                    shutil.rmtree(prev_checkpoint)
+                    logger.info(f"Deleted previous checkpoint: {prev_checkpoint}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete previous checkpoint {prev_checkpoint}: {e}")
+        
+        # 所有进程同步，准备进入下一个epoch
         dist.barrier()
+        if logger:
+            logger.info(f"Rank {rank} completed epoch {epoch+1}, ready for next epoch")
     
     dist.destroy_process_group()
 

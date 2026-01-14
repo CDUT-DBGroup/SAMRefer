@@ -136,7 +136,9 @@ def _segm_refersam_enhanced(pretrained, args, criterion):
         'num_extra_layers': 2,
         "num_prompt_layers": 2,
         'use_lang_attention': getattr(args, 'use_lang_attention', True),  # 消融实验：默认使用文本注意力
-        'use_csaf': getattr(args, 'use_csaf', True),  # 消融实验：默认使用Cross-Scale Attention Fusion (CSAF)模块
+        'use_csaf': getattr(args, 'use_csaf', True),  # 消融实验：默认使用Cross-Scale Attention Fusion (CSAF)模块（控制ViT-C3融合等）
+        'use_multi_scale_fusion': getattr(args, 'use_multi_scale_fusion', None),  # 消融实验：是否使用MultiScaleFusion（c2, c3, c4融合），None时使用use_csaf的值
+        'use_enhanced_c1c2_fusion': getattr(args, 'use_enhanced_c1c2_fusion', None),  # 消融实验：是否使用EnhancedC1C2Fusion（c1, c2融合），None时使用use_csaf的值
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     

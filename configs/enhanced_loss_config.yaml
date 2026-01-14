@@ -3,8 +3,8 @@
 
 # Loss function flags - 损失函数开关
 use_focal: true          # 是否使用Focal Loss处理类别不平衡
-use_iou: true            # 是否使用IoU Loss提高分割精度
-use_boundary: true       # 是否使用边界损失提升边缘质量
+use_iou: false            # 是否使用IoU Loss提高分割精度
+use_boundary: false       # 是否使用边界损失提升边缘质量
 use_adaptive_weighting: true   # 启用自适应权重调整
 
 # Focal Loss parameters - Focal Loss参数

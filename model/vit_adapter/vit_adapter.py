@@ -16,12 +16,22 @@ class ViTAdapter(nn.Module):
                  deform_num_heads=6, interaction_indexes=None, with_cffn=True, init_values=0.,
                  cffn_ratio=0.25, add_vit_feature=False, drop_path_rate=0., dropout=0.,
                  with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=1, using_clip=True,
-                 use_lang_attention=True, use_csaf=True):
+                 use_lang_attention=True, use_csaf=True, use_multi_scale_fusion=None, use_enhanced_c1c2_fusion=None):
         
         super().__init__()
         self.using_clip = using_clip
         self.use_lang_attention = use_lang_attention  # 消融实验开关：是否使用文本注意力
-        self.use_csaf = use_csaf  # 消融实验开关：是否使用Cross-Scale Attention Fusion (CSAF)模块
+        self.use_csaf = use_csaf  # 消融实验开关：是否使用Cross-Scale Attention Fusion (CSAF)模块（控制ViT-C3融合等）
+        
+        # 特征融合模块的独立开关（用于消融实验）
+        # 如果未指定，则使用 use_csaf 的值（向后兼容）
+        if use_multi_scale_fusion is None:
+            use_multi_scale_fusion = use_csaf
+        if use_enhanced_c1c2_fusion is None:
+            use_enhanced_c1c2_fusion = use_csaf
+        
+        self.use_multi_scale_fusion = use_multi_scale_fusion  # 消融实验开关：是否使用MultiScaleFusion（c2, c3, c4融合）
+        self.use_enhanced_c1c2_fusion = use_enhanced_c1c2_fusion  # 消融实验开关：是否使用EnhancedC1C2Fusion（c1, c2融合）
         self.vis_model = vis_model
         self.drop_path_rate = drop_path_rate
         self.interaction_indexes = interaction_indexes
@@ -51,11 +61,11 @@ class ViTAdapter(nn.Module):
         
         # CSAF模块：Cross-Scale Attention Fusion
         # 1. 多尺度特征融合模块（c2, c3, c4之间的跨尺度注意力）
-        if self.use_csaf:
+        if self.use_multi_scale_fusion:
             self.multi_scale_fusion = MultiScaleFusion(dim=out_dim, num_scales=3, num_heads=8, dropout=dropout)
         
         # 2. 增强的c1和c2融合模块（替代简单的上采样相加）
-        if with_deconv and self.use_csaf:
+        if with_deconv and self.use_enhanced_c1c2_fusion:
             self.c1c2_fusion = EnhancedC1C2Fusion(dim=out_dim, dropout=dropout)
 
         self.sparse_prompts = nn.Embedding(num_prompts[1], out_dim)
@@ -200,7 +210,7 @@ class ViTAdapter(nn.Module):
         c4 = self.adapter_proj[2](c4)
         
         # CSAF模块1：使用多尺度融合模块增强特征（c2, c3, c4之间的跨尺度注意力）
-        if self.use_csaf:
+        if self.use_multi_scale_fusion:
             feats_list = [c2, c3, c4]
             enhanced_feats_list = self.multi_scale_fusion(feats_list)  # List of [B, N_i, D]
             # 更新c2, c3, c4为增强后的特征
@@ -217,7 +227,7 @@ class ViTAdapter(nn.Module):
         if self.with_deconv:
             c1 = self.c1_norm(self.c1_conv(c1))
             # CSAF模块2：使用增强的c1c2融合模块替代简单的上采样相加
-            if self.use_csaf:
+            if self.use_enhanced_c1c2_fusion:
                 c1 = self.c1c2_fusion(c1, c2)  # [B, C, H1, W1]
             else:
                 # 原始方法：简单的上采样相加

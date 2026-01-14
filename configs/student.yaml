@@ -20,6 +20,25 @@ clip_path: null
 
 precision: fp32
 
-pre_train_path: output/refersam_bert/enhanced_multi_dataset_best_iou_miou_model_1203
-# resume: output/refersam_bert/checkpoint_epoch_20
+pre_train_path: output/refersam_bert/no_two_textattention_csaf/enhanced_multi_dataset_best_iou_miou_model
+# resume: output/refersam_bert/no_one/enhanced_multi_dataset_best_iou_miou_model
+
+# ============================================
+# 特征融合模块消融实验配置 (Feature Fusion Ablation)
+# ============================================
+# Exp-2.1: Baseline - 两个都设为 false
+# Exp-2.2: + MultiScaleFusion - use_multi_scale_fusion: true, use_enhanced_c1c2_fusion: false
+# Exp-2.3: + EnhancedC1C2Fusion - use_multi_scale_fusion: false, use_enhanced_c1c2_fusion: true
+# Exp-2.4: + Both Fusion - 两个都设为 true
+# Exp-2.5: + ViT-C3 Fusion - 由 use_csaf 控制（保留向后兼容）
+# Exp-2.6: Full Fusion Module - 两个都设为 true，use_csaf: true
+
+# 多尺度特征融合开关 (MultiScaleFusion: c2, c3, c4之间的跨尺度注意力融合)
+use_multi_scale_fusion: true
+
+# 增强的C1C2融合开关 (EnhancedC1C2Fusion: 空间注意力融合C1和C2)
+use_enhanced_c1c2_fusion: true
+
+# CSAF总开关（向后兼容，控制ViT-C3融合等，建议保持true以使用完整功能）
+use_csaf: true
 
