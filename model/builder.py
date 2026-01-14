@@ -47,6 +47,7 @@ def _segm_refersam(pretrained, args, criterion):
         'use_csaf': getattr(args, 'use_csaf', True),  # 消融实验：默认使用Cross-Scale Attention Fusion (CSAF)模块（控制ViT-C3融合等）
         'use_multi_scale_fusion': getattr(args, 'use_multi_scale_fusion', None),  # 消融实验：是否使用MultiScaleFusion（c2, c3, c4融合），None时使用use_csaf的值
         'use_enhanced_c1c2_fusion': getattr(args, 'use_enhanced_c1c2_fusion', None),  # 消融实验：是否使用EnhancedC1C2Fusion（c1, c2融合），None时使用use_csaf的值
+        'use_lang_fusion_weights': getattr(args, 'use_lang_fusion_weights', None),  # 消融实验：是否使用可学习融合权重（结合基础token和注意力结果），None时使用use_lang_attention的值
     }
     model = ReferSAM(sam_model, text_model, args, criterion=criterion, **adapter_configs)
     if pretrained is True:

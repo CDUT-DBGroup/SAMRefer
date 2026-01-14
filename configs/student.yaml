@@ -42,3 +42,17 @@ use_enhanced_c1c2_fusion: true
 # CSAF总开关（向后兼容，控制ViT-C3融合等，建议保持true以使用完整功能）
 use_csaf: true
 
+# ============================================
+# 文本注意力聚合消融实验配置 (Text Attention Ablation)
+# ============================================
+# Exp-3.1: Baseline - use_lang_attention: false
+# Exp-3.2: + Text Attention - use_lang_attention: true, use_lang_fusion_weights: false
+# Exp-3.3: + Text Attention + Fusion - use_lang_attention: true, use_lang_fusion_weights: true
+# Exp-3.4: Full Text Module - 同 Exp-3.3
+
+# 文本注意力开关 (是否使用文本注意力机制聚合文本特征)
+use_lang_attention: true
+
+# 文本融合权重开关 (是否使用可学习权重融合基础token和注意力结果)
+use_lang_fusion_weights: true
+
