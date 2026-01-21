@@ -12,7 +12,7 @@ export FILELOCK_DEFAULT_CLASS=SoftFileLock
 export TRANSFORMER_AUTOTUNE_CACHE=/tmp/deepspeed_autotune_cache
 
 # 端口（避免 29500 冲突）
-MASTER_PORT=29495
+MASTER_PORT=29501
 
 # 激活环境
 source ~/conda.env
@@ -27,14 +27,14 @@ EOF
 # ======== 启动 DeepSpeed（关键部分） ========
 deepspeed \
   --master_port ${MASTER_PORT} \
-  --include localhost:2,3 \
+  --include localhost:0,1 \
   train_enhanced_multi_dataset.py \
   --deepspeed_config configs/ds_config.json \
   --config configs/student.yaml \
   --use_enhanced_loss \
   --loss_config_path configs/enhanced_loss_config.yaml \
-  --output_dir output/refersam_bert/abla/loss_no_boundary_iou \
-  > 测试增强损失函数_没有boundary_iou.log 2>&1
+  --output_dir output/text/no_fusion_weight \
+  > 文本注意力测试-没有融合权重.log 2>&1
 
 echo "Training started."
 echo "Monitor: tail -f train_loss_*.log"

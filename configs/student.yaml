@@ -54,5 +54,5 @@ use_csaf: true
 use_lang_attention: true
 
 # 文本融合权重开关 (是否使用可学习权重融合基础token和注意力结果)
-use_lang_fusion_weights: true
+use_lang_fusion_weights: false
 
