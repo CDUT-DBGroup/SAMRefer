@@ -16,12 +16,29 @@ class ViTAdapter(nn.Module):
                  deform_num_heads=6, interaction_indexes=None, with_cffn=True, init_values=0.,
                  cffn_ratio=0.25, add_vit_feature=False, drop_path_rate=0., dropout=0.,
                  with_cp=False, with_deconv=True, num_extra_layers=-1, num_prompt_layers=1, using_clip=True,
-                 use_lang_attention=True, use_csaf=True):
+                 use_lang_attention=True, use_csaf=True, use_multi_scale_fusion=None, use_enhanced_c1c2_fusion=None,
+                 use_lang_fusion_weights=None):
         
         super().__init__()
         self.using_clip = using_clip
         self.use_lang_attention = use_lang_attention  # 消融实验开关：是否使用文本注意力
-        self.use_csaf = use_csaf  # 消融实验开关：是否使用Cross-Scale Attention Fusion (CSAF)模块
+        self.use_csaf = use_csaf  # 消融实验开关：是否使用Cross-Scale Attention Fusion (CSAF)模块（控制ViT-C3融合等）
+        
+        # 特征融合模块的独立开关（用于消融实验）
+        # 如果未指定，则使用 use_csaf 的值（向后兼容）
+        if use_multi_scale_fusion is None:
+            use_multi_scale_fusion = use_csaf
+        if use_enhanced_c1c2_fusion is None:
+            use_enhanced_c1c2_fusion = use_csaf
+        
+        self.use_multi_scale_fusion = use_multi_scale_fusion  # 消融实验开关：是否使用MultiScaleFusion（c2, c3, c4融合）
+        self.use_enhanced_c1c2_fusion = use_enhanced_c1c2_fusion  # 消融实验开关：是否使用EnhancedC1C2Fusion（c1, c2融合）
+        
+        # 文本注意力融合权重开关（用于消融实验）
+        # 如果未指定，则使用 use_lang_attention 的值（向后兼容）
+        if use_lang_fusion_weights is None:
+            use_lang_fusion_weights = use_lang_attention
+        self.use_lang_fusion_weights = use_lang_fusion_weights  # 消融实验开关：是否使用可学习融合权重（结合基础token和注意力结果）
         self.vis_model = vis_model
         self.drop_path_rate = drop_path_rate
         self.interaction_indexes = interaction_indexes
@@ -51,11 +68,11 @@ class ViTAdapter(nn.Module):
         
         # CSAF模块：Cross-Scale Attention Fusion
         # 1. 多尺度特征融合模块（c2, c3, c4之间的跨尺度注意力）
-        if self.use_csaf:
+        if self.use_multi_scale_fusion:
             self.multi_scale_fusion = MultiScaleFusion(dim=out_dim, num_scales=3, num_heads=8, dropout=dropout)
         
         # 2. 增强的c1和c2融合模块（替代简单的上采样相加）
-        if with_deconv and self.use_csaf:
+        if with_deconv and self.use_enhanced_c1c2_fusion:
             self.c1c2_fusion = EnhancedC1C2Fusion(dim=out_dim, dropout=dropout)
 
         self.sparse_prompts = nn.Embedding(num_prompts[1], out_dim)
@@ -64,8 +81,8 @@ class ViTAdapter(nn.Module):
         self.postional_encoding_prompter = SinePositionalEncoding(num_feats=out_dim//2, normalize=True)
         # 可学习的权重参数，用于组合基础token和加权聚合的文本特征
         # 初始化为接近原始权重0.7和0.3的值（通过logit空间：log(0.7/0.3) ≈ 0.85）
-        # 只有在使用文本注意力时才需要融合权重
-        if self.use_lang_attention:
+        # 只有在使用文本注意力和融合权重时才需要
+        if self.use_lang_attention and self.use_lang_fusion_weights:
             self.lang_fusion_weights = nn.Parameter(torch.tensor([0.85, -0.85]))
         
         # 3. vit_feats与c3融合的可学习权重（用于提升oIoU）
@@ -200,7 +217,7 @@ class ViTAdapter(nn.Module):
         c4 = self.adapter_proj[2](c4)
         
         # CSAF模块1：使用多尺度融合模块增强特征（c2, c3, c4之间的跨尺度注意力）
-        if self.use_csaf:
+        if self.use_multi_scale_fusion:
             feats_list = [c2, c3, c4]
             enhanced_feats_list = self.multi_scale_fusion(feats_list)  # List of [B, N_i, D]
             # 更新c2, c3, c4为增强后的特征
@@ -217,7 +234,7 @@ class ViTAdapter(nn.Module):
         if self.with_deconv:
             c1 = self.c1_norm(self.c1_conv(c1))
             # CSAF模块2：使用增强的c1c2融合模块替代简单的上采样相加
-            if self.use_csaf:
+            if self.use_enhanced_c1c2_fusion:
                 c1 = self.c1c2_fusion(c1, c2)  # [B, C, H1, W1]
             else:
                 # 原始方法：简单的上采样相加
@@ -252,11 +269,16 @@ class ViTAdapter(nn.Module):
             )  # [B, 1, out_dim]
             lang_g_attn = lang_g_attn.squeeze(1).unsqueeze(1)  # [B, 1, out_dim]
 
-            # 结合基础token和注意力聚合（使用可学习权重）
-            fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
-            lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_attn
+            # 消融实验：根据use_lang_fusion_weights决定是否使用融合权重
+            if self.use_lang_fusion_weights:
+                # 结合基础token和注意力聚合（使用可学习权重）
+                fusion_weights = F.softmax(self.lang_fusion_weights, dim=0)  # [2] -> 归一化为和为1的权重
+                lang_g = fusion_weights[0] * lang_g_base + fusion_weights[1] * lang_g_attn
+            else:
+                # 不使用融合权重，直接使用注意力聚合结果（Exp-3.2）
+                lang_g = lang_g_attn
         else:
-            # 不使用注意力机制，直接使用基础token（原始方法）
+            # 不使用注意力机制，直接使用基础token（原始方法，Exp-3.1）
             if self.using_clip:
                 eos_index = lang_mask.sum(1).long() - 1
                 lang_g = lang_feats[torch.arange(bs), eos_index].unsqueeze(1)  # [B, 1, C], [EOS] embeddings

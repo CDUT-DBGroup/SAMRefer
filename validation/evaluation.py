@@ -211,6 +211,14 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
             - 'first': 使用第一个描述（默认行为）
     """
     model.eval()
+    
+    # 确保模型的所有参数都在正确的设备上
+    # 获取模型实际所在的设备（通过检查第一个参数）
+    model_device = next(model.parameters()).device
+    if model_device != device:
+        print(f"Warning: Model is on {model_device}, but data will be on {device}. Moving model to {device}...")
+        model = model.to(device)
+        model_device = device
 
     total_intersection = 0.0
     total_union = 0.0
@@ -237,13 +245,14 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
     with torch.no_grad():
         for batch_idx, (samples, targets) in enumerate(tqdm(val_loader, desc='Validating')):
             # 保持与训练阶段一致的精度设置，避免 dtype 不匹配
+            # 确保数据移动到模型所在的设备
             if use_fp16:
-                img = samples['img'].to(device, non_blocking=True).half()
+                img = samples['img'].to(model_device, non_blocking=True).half()
             elif use_bf16:
-                img = samples['img'].to(device, non_blocking=True).to(torch.bfloat16)
+                img = samples['img'].to(model_device, non_blocking=True).to(torch.bfloat16)
             else:
-                img = samples['img'].to(device, non_blocking=True)
-            target = targets['mask'].to(device, non_blocking=True).squeeze(1)  # [B,H,W]
+                img = samples['img'].to(model_device, non_blocking=True)
+            target = targets['mask'].to(model_device, non_blocking=True).squeeze(1)  # [B,H,W]
 
             if use_best_sentence and 'all_word_ids' in samples:
                 # 对每个样本的所有描述进行推理，根据聚合方式选择结果
@@ -258,8 +267,8 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                     
                     if len(all_word_ids_i) == 0:
                         # 如果没有描述，使用默认方式
-                        word_ids_i = samples['word_ids'][i:i+1].to(device, non_blocking=True)
-                        word_masks_i = samples['word_masks'][i:i+1].to(device, non_blocking=True)
+                        word_ids_i = samples['word_ids'][i:i+1].to(model_device, non_blocking=True)
+                        word_masks_i = samples['word_masks'][i:i+1].to(model_device, non_blocking=True)
                         pred_mask_i = model(img_i, word_ids_i, word_masks_i, use_negative_masks=use_negative_masks)
                         if pred_mask_i.ndim == 4:
                             pred_mask_i = pred_mask_i.squeeze(1)
@@ -271,8 +280,9 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                     sentence_ious = []  # 重命名局部变量，避免覆盖全局all_ious
                     
                     for word_ids_i, word_masks_i in zip(all_word_ids_i, all_word_masks_i):
-                        word_ids_i = word_ids_i.unsqueeze(0).to(device, non_blocking=True)
-                        word_masks_i = word_masks_i.unsqueeze(0).to(device, non_blocking=True)
+                        # 确保数据在模型所在的设备上
+                        word_ids_i = word_ids_i.unsqueeze(0).to(model_device, non_blocking=True)
+                        word_masks_i = word_masks_i.unsqueeze(0).to(model_device, non_blocking=True)
                         
                         pred_mask_i = model(img_i, word_ids_i, word_masks_i, use_negative_masks=use_negative_masks)
                         if pred_mask_i.ndim == 4:
@@ -330,8 +340,9 @@ def validate(model, val_loader, device, use_fp16=False, use_bf16=False, use_nega
                 pred_masks = torch.stack(final_pred_masks, dim=0)
             else:
                 # 使用提供的描述进行推理
-                word_ids = samples['word_ids'].to(device, non_blocking=True)
-                word_masks = samples['word_masks'].to(device, non_blocking=True)
+                # 确保数据在模型所在的设备上
+                word_ids = samples['word_ids'].to(model_device, non_blocking=True)
+                word_masks = samples['word_masks'].to(model_device, non_blocking=True)
                 
                 pred_masks = model(img, word_ids, word_masks, use_negative_masks=use_negative_masks)
                 if pred_masks.ndim == 4:

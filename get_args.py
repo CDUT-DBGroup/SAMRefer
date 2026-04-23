@@ -36,10 +36,14 @@ def get_args():
     parser.add_argument('--sentence_aggregation', type=str, choices=['best', 'mean', 'mean_iou', 'median'],
                        default='mean', help='Sentence aggregation method for validation')
     # 消融实验参数
-    parser.add_argument('--use_lang_attention', type=lambda x: (str(x).lower() == 'true'), default=True,
-                       help='Use language attention mechanism for text feature aggregation (for ablation study)')
-    parser.add_argument('--use_csaf', type=lambda x: (str(x).lower() == 'true'), default=True,
-                       help='Use Cross-Scale Attention Fusion (CSAF) module (for ablation study)')
+    #parser.add_argument('--use_csaf', type=lambda x: (str(x).lower() == 'true'), default=True,
+    #                   help='Use Cross-Scale Attention Fusion (CSAF) module (for ablation study, controls ViT-C3 fusion etc.)')
+    #parser.add_argument('--use_multi_scale_fusion', type=lambda x: (str(x).lower() == 'true') if x is not None else None, default=None,
+     #                  help='Use MultiScaleFusion module for c2, c3, c4 cross-scale attention fusion (for ablation study). If #None, uses use_csaf value.')
+    #parser.add_argument('--use_enhanced_c1c2_fusion', type=lambda x: (str(x).lower() == 'true') if x is not None else None, #default=None,
+         #              help='Use EnhancedC1C2Fusion module for spatial attention fusion of c1 and c2 (for ablation study). If #None, uses use_csaf value.')
+    #parser.add_argument('--use_lang_fusion_weights', type=lambda x: (str(x).lower() == 'true') if x is not None else None, #default=None,
+         #              help='Use learnable fusion weights to combine base token and attention-aggregated text features (for #ablation study). If None, uses use_lang_attention value.')
     # Step 4: 解析所有参数（命令行优先）
     args = parser.parse_args()
     return args

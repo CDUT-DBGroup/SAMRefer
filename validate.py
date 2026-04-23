@@ -164,96 +164,96 @@ def create_datasets(args):
     创建并返回需要验证的数据集和其名称组成的列表
     """
     dataset_configs = [
-        # {
-        #     'name': 'refcoco',
-        #     'class': ReferDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'refcoco',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'val',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
-        # {
-        #     'name': 'refcoco',
-        #     'class': ReferDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'refcoco',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'testA',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
-        #  {
-        #     'name': 'refcoco',
-        #     'class': ReferDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'refcoco',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'testB',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
-        # {
-        #     'name': 'refcoco+',
-        #     'class': ReferDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'refcoco+',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'val',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
-        # {
-        #     'name': 'refcoco+',
-        #     'class': ReferDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'refcoco+',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'testA',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
-        # {
-        #     'name': 'refcoco+',
-        #     'class': ReferDataset,
-        #     'kwargs': {
-        #         'refer_data_root': args.data_root,
-        #         'dataset': 'refcoco+',
-        #         'splitBy': 'unc',
-        #         'bert_tokenizer': args.tokenizer_type,
-        #         'max_tokens': getattr(args, 'max_tokens', 30),
-        #         'split': 'testB',
-        #         'eval_mode': False,
-        #         'size': getattr(args, 'img_size', 320),
-        #         'precision': args.precision
-        #     }
-        # },
+        {
+             'name': 'refcoco',
+             'class': ReferDataset,
+             'kwargs': {
+                 'refer_data_root': args.data_root,
+                 'dataset': 'refcoco',
+                 'splitBy': 'unc',
+                 'bert_tokenizer': args.tokenizer_type,
+                 'max_tokens': getattr(args, 'max_tokens', 30),
+                 'split': 'val',
+                 'eval_mode': False,
+                 'size': getattr(args, 'img_size', 320),
+                 'precision': args.precision
+             }
+         },
+        {
+             'name': 'refcoco',
+             'class': ReferDataset,
+             'kwargs': {
+                 'refer_data_root': args.data_root,
+                 'dataset': 'refcoco',
+                 'splitBy': 'unc',
+                 'bert_tokenizer': args.tokenizer_type,
+                 'max_tokens': getattr(args, 'max_tokens', 30),
+                 'split': 'testA',
+                 'eval_mode': False,
+                 'size': getattr(args, 'img_size', 320),
+                 'precision': args.precision
+             }
+         },
+          {
+             'name': 'refcoco',
+             'class': ReferDataset,
+             'kwargs': {
+                 'refer_data_root': args.data_root,
+                 'dataset': 'refcoco',
+                 'splitBy': 'unc',
+                 'bert_tokenizer': args.tokenizer_type,
+                 'max_tokens': getattr(args, 'max_tokens', 30),
+                 'split': 'testB',
+                 'eval_mode': False,
+                 'size': getattr(args, 'img_size', 320),
+                 'precision': args.precision
+             }
+         },
+         {
+             'name': 'refcoco+',
+             'class': ReferDataset,
+             'kwargs': {
+                 'refer_data_root': args.data_root,
+                 'dataset': 'refcoco+',
+                 'splitBy': 'unc',
+                 'bert_tokenizer': args.tokenizer_type,
+                 'max_tokens': getattr(args, 'max_tokens', 30),
+                 'split': 'val',
+                 'eval_mode': False,
+                 'size': getattr(args, 'img_size', 320),
+                 'precision': args.precision
+             }
+         },
+         {
+             'name': 'refcoco+',
+             'class': ReferDataset,
+             'kwargs': {
+                 'refer_data_root': args.data_root,
+                 'dataset': 'refcoco+',
+                 'splitBy': 'unc',
+                 'bert_tokenizer': args.tokenizer_type,
+                 'max_tokens': getattr(args, 'max_tokens', 30),
+                 'split': 'testA',
+                 'eval_mode': False,
+                 'size': getattr(args, 'img_size', 320),
+                 'precision': args.precision
+             }
+         },
+         {
+             'name': 'refcoco+',
+             'class': ReferDataset,
+             'kwargs': {
+                 'refer_data_root': args.data_root,
+                 'dataset': 'refcoco+',
+                 'splitBy': 'unc',
+                 'bert_tokenizer': args.tokenizer_type,
+                 'max_tokens': getattr(args, 'max_tokens', 30),
+                 'split': 'testB',
+                 'eval_mode': False,
+                 'size': getattr(args, 'img_size', 320),
+                 'precision': args.precision
+             }
+         },
         # {
         #     'name': 'refcocog',
         #     'class': ReferDataset,
@@ -294,51 +294,51 @@ def create_datasets(args):
         #         'size': getattr(args, 'img_size', 320)
         #     }
         # },
-        {
-            'name': 'grefcoco',
-            'class': GRefDataset,
-            'kwargs': {
-                'refer_data_root': args.data_root,
-                'dataset': 'grefcoco',
-                'splitBy': 'unc',
-                'bert_tokenizer': args.tokenizer_type,
-                'max_tokens': getattr(args, 'max_tokens', 30),
-                'split': 'val',
-                'eval_mode': False,
-                'size': getattr(args, 'img_size', 320),
-                'precision': args.precision
-            }
-        },
-        {
-            'name': 'grefcoco',
-            'class': GRefDataset,
-            'kwargs': {
-                'refer_data_root': args.data_root,
-                'dataset': 'grefcoco',
-                'splitBy': 'unc',
-                'bert_tokenizer': args.tokenizer_type,
-                'max_tokens': getattr(args, 'max_tokens', 30),
-                'split': 'testA',
-                'eval_mode': False,
-                'size': getattr(args, 'img_size', 320),
-                'precision': args.precision
-            }
-        },
-        {
-            'name': 'grefcoco',
-            'class': GRefDataset,
-            'kwargs': {
-                'refer_data_root': args.data_root,
-                'dataset': 'grefcoco',
-                'splitBy': 'unc',
-                'bert_tokenizer': args.tokenizer_type,
-                'max_tokens': getattr(args, 'max_tokens', 30),
-                'split': 'testB',
-                'eval_mode': False,
-                'size': getattr(args, 'img_size', 320),
-                'precision': args.precision
-            }
-        },
+        #{
+        #    'name': 'grefcoco',
+        #    'class': GRefDataset,
+        #    'kwargs': {
+        #        'refer_data_root': args.data_root,
+        #        'dataset': 'grefcoco',
+        #        'splitBy': 'unc',
+        #        'bert_tokenizer': args.tokenizer_type,
+        #        'max_tokens': getattr(args, 'max_tokens', 30),
+        #        'split': 'val',
+        #        'eval_mode': False,
+        #        'size': getattr(args, 'img_size', 320),
+        #        'precision': args.precision
+        #    }
+        #},
+        #{
+        #    'name': 'grefcoco',
+        #    'class': GRefDataset,
+        #    'kwargs': {
+        #        'refer_data_root': args.data_root,
+        #        'dataset': 'grefcoco',
+        #        'splitBy': 'unc',
+        #        'bert_tokenizer': args.tokenizer_type,
+        #        'max_tokens': getattr(args, 'max_tokens', 30),
+        #        'split': 'testA',
+        #        'eval_mode': False,
+        #        'size': getattr(args, 'img_size', 320),
+        #        'precision': args.precision
+        #    }
+        #},
+        #{
+        #    'name': 'grefcoco',
+        #    'class': GRefDataset,
+        #    'kwargs': {
+        #        'refer_data_root': args.data_root,
+        #        'dataset': 'grefcoco',
+        #        'splitBy': 'unc',
+        #        'bert_tokenizer': args.tokenizer_type,
+        #        'max_tokens': getattr(args, 'max_tokens', 30),
+        #        'split': 'testB',
+        #        'eval_mode': False,
+        #        'size': getattr(args, 'img_size', 320),
+        #        'precision': args.precision
+        #    }
+        #},
         # {
         #     'name': 'ref-zom',
         #     'class': ReferzomDataset,
@@ -398,6 +398,17 @@ def evaluate_four_datasets():
         loss_config_path=loss_config_path,
         device=device
     )
+    
+    # 确保模型的所有参数都在正确的设备上
+    model_device = next(eval_model.parameters()).device
+    if model_device != device:
+        logger.warning(f"Model is on {model_device}, but expected {device}. Moving model to {device}...")
+        eval_model = eval_model.to(device)
+        model_device = device
+        # 如果是 DeepSpeed 引擎，也需要更新
+        if model_engine is not None:
+            model_engine = model_engine.to(device)
+    logger.info(f"Model is on device: {model_device}")
     
     if model_engine is not None:
         logger.info("Successfully loaded DeepSpeed checkpoint")
